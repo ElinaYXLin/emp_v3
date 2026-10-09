@@ -97,40 +97,19 @@ extension AppState {
         let tailSec = min(decaySec, 2.0)
 
         let sections: [ListenerReport.Section] = [
-            .init(title: "COLOR", rows: [
-                .init(label: "Lo-mid bell",   value: String(format: "%+.1f dB @ 150 Hz, Q 0.1 (~10 oct wide)", eqDb)),
-                .init(label: "Even saturator", value: String(format: "%.1f dB drive, tube-biased tanh", evenDb)),
-                .init(label: "Odd saturator",  value: String(format: "%.1f dB drive, symmetric tanh", oddDb)),
-                .init(label: "High roll-off",  value: String(format: "%.1f dB/oct above 1 kHz (%.1f dB @ 10 kHz)", rollSlope, -roll10k)),
-                .init(label: "Recipe",         value: recipe.name == "Classic" ? "Classic (plain even/odd)" : "\(recipe.name): \(recipe.blurb)"),
-                .init(label: "Tape hysteresis", value: hyst > 0.001
-                      ? String(format: "%.0f%%: %.1f× drive, loop %.0f%% of level, +%.1f dB head bump @ 90 Hz", hyst * 100, 1 + 2 * hyst, hyst * 28, 2.5 * hyst)
+            .init(title: "EMULATION · CHOIR", rows: [
+                .init(label: "Singers",  value: cVoices > 0.001
+                      ? String(format: "%.1f voices, fixed random pan & distance (up to 15 ms later, darker)", cVoices * 16)
                       : "off"),
-                .init(label: "Tape sag",       value: sag > 0.001
-                      ? String(format: "%.0f%%: up to −%.1f dB dip, top → %.0f kHz, %.1f ms motor droop", sag * 100, -20 * log10(1 - 0.5 * sag), (18000 - 12000 * sag) / 1000, 4 * sag)
-                      : "off"),
-                .init(label: "Choir",          value: cVoices > 0.001
-                      ? String(format: "%.1f singers, detune ±%.0f ct, delay to %.0f ms, vibrato ±%.0f ct @ 3–20 Hz", cVoices * 16, 35 * cDetune, 60 * cDelay, 40 * cVib)
-                      : "off"),
-                .init(label: "Wow & flutter",  value: wow > 0.001
-                      ? String(format: "%.0f%%: wow ±%.2f %% @ 0.4–1.6 Hz, flutter ±%.2f %% @ 6–14 Hz", wow * 100, 0.5 * wow, 0.12 * wow)
-                      : "off"),
-                .init(label: "Self-erasure",   value: erase > 0.001
-                      ? String(format: "%.0f%%: treble above 3.5 kHz compressed and soft-clipped on loud bright passages", erase * 100)
-                      : "off"),
-                .init(label: "Tube wobble",    value: wobble > 0.001
-                      ? String(format: "%.0f%%: even-sat bias drifts ±%.2f over 20–100 s; rising bias closes a low-pass to %.1f kHz", wobble * 100, wobble, 20 * pow(0.125, wobble))
-                      : "off"),
-                .init(label: "Tube fuzz",      value: fuzz > 0.001
-                      ? String(format: "%.0f%%: transformer flux drive %.1f×, ~5× heavier @ 40 Hz than 200 Hz, cab LP %.1f kHz", fuzz * 100, 14 * pow(fuzz, 1.2), (4500 - 1500 * fuzz) / 1000)
-                      : "off"),
-                .init(label: "Tube bloom",     value: bloom > 0.001
-                      ? String(format: "%.0f%%: bass-driven dip, %.0f ms recovery, mids take ⅓", bloom * 100, 100 + 200 * bloom)
-                      : "off"),
-                .init(label: "Tube fur",       value: fur > 0.001
-                      ? String(format: "%.0f%%: bias shift after loud bass, up to ~%.0f soft crackles/s", fur * 100, 2 + 60 * fur * fur)
-                      : "off"),
-                .init(label: "Subsonic cut",   value: "12 dB/oct below 25 Hz"),
+                .init(label: "Detune",   value: cVoices > 0.001 && cDetune > 0.001
+                      ? String(format: "±%.0f ct around each voice's tendency (±%.0f ct), new target every 10 s", 35 * cDetune, 17.5 * cDetune)
+                      : "none"),
+                .init(label: "Delay",    value: cVoices > 0.001 && cDelay > 0.001
+                      ? String(format: "0–%.0f ms, wandering the same way", 60 * cDelay)
+                      : "none"),
+                .init(label: "Vibrato",  value: cVoices > 0.001 && cVib > 0.001
+                      ? String(format: "±%.0f ct, 3–20 Hz per voice", 40 * cVib)
+                      : "none"),
             ]),
             .init(title: "SPECTRAL HAZE", rows: [
                 .init(label: "Group delay",   value: String(format: "%.1f periods → %.0f ms @ 50 Hz, %.0f ms @ 100 Hz, %.1f ms @ 1 kHz", gdScale, gd50ms, gd100ms, gd1kms)),
@@ -150,6 +129,44 @@ extension AppState {
                       : "off"),
                 .init(label: "Grain echo",    value: grain > 0.001
                       ? String(format: "%.0f ms memory, %.0f ms grains ±%.0f¢, %.1f dB re dry", grainMemMs, grainLenMs, grainCents, grainMixDb)
+                      : "off"),
+            ]),
+            .init(title: "COLOR", rows: [
+                .init(label: "Lo-mid bell",   value: String(format: "%+.1f dB @ 150 Hz, Q 0.1 (~10 oct wide)", eqDb)),
+                .init(label: "Even saturator", value: String(format: "%.1f dB drive, tube-biased tanh", evenDb)),
+                .init(label: "Odd saturator",  value: String(format: "%.1f dB drive, symmetric tanh", oddDb)),
+                .init(label: "Recipe",         value: recipe.name == "Classic" ? "Classic (plain even/odd)" : "\(recipe.name): \(recipe.blurb)"),
+                .init(label: "High roll-off",  value: String(format: "%.1f dB/oct above 1 kHz (%.1f dB @ 10 kHz)", rollSlope, -roll10k)),
+                .init(label: "Subsonic cut",   value: "12 dB/oct below 25 Hz before the saturators, 24 dB/oct at the end of the chain"),
+            ]),
+            .init(title: "EMULATION · TAPE", rows: [
+                .init(label: "Hysteresis",    value: hyst > 0.001
+                      ? String(format: "%.0f%%: %.1f× drive, loop %.0f%% of level, +%.1f dB head bump @ 90 Hz", hyst * 100, 1 + 2 * hyst, hyst * 28, 2.5 * hyst)
+                      : "off"),
+                .init(label: "Self-erasure",  value: erase > 0.001
+                      ? String(format: "%.0f%%: treble >3.5 kHz squashed on loud bright passages (~−%.0f dB)", erase * 100, 7 * min(1, erase * 1.6))
+                      : "off"),
+                .init(label: "Sag",           value: sag > 0.001
+                      ? String(format: "%.0f%%: up to −%.1f dB dip, top → %.0f kHz, %.1f ms motor droop", sag * 100, -20 * log10(1 - 0.5 * sag), (18000 - 12000 * sag) / 1000, 4 * sag)
+                      : "off"),
+                .init(label: "Wow & flutter", value: wow > 0.001
+                      ? String(format: "%.0f%%: wow ±%.0f ct @ 0.4–1.6 Hz, flutter ±%.1f ct @ 6–14 Hz", wow * 100, 8.7 * wow, 2.1 * wow)
+                      : "off"),
+            ]),
+            .init(title: "EMULATION · TUBE AMP", rows: [
+                .init(label: "Fuzz",   value: fuzz > 0.001
+                      ? String(format: "%.0f%%: transformer flux drive %.1f× (lows fuzz hardest), cab LP %.1f kHz", fuzz * 100, 14 * pow(fuzz, 1.2), (4500 - 1500 * fuzz) / 1000)
+                      : "off"),
+                .init(label: "Bloom",  value: bloom > 0.001
+                      ? String(format: "%.0f%%: bass-driven dip, %.0f ms recovery, mids take ⅓", bloom * 100, 100 + 200 * bloom)
+                      : "off"),
+                .init(label: "Fur",    value: fur > 0.001
+                      ? String(format: "%.0f%%: bias shift after loud bass, up to ~%.0f soft crackles/s", fur * 100, 2 + 60 * fur * fur)
+                      : "off"),
+                .init(label: "Wobble", value: wobble > 0.001
+                      ? (evenDb > 0.1
+                         ? String(format: "%.0f%%: even-sat bias drifts ±%.2f over 20–100 s, low-pass down to %.1f kHz", wobble * 100, wobble, 20 * pow(0.125, wobble))
+                         : "set, but inactive (needs Even Sat)")
                       : "off"),
             ]),
             .init(title: "GAIN STAGING", rows: [
@@ -233,7 +250,9 @@ extension AppState {
             (grain, "The Memory Collector", "hears every song as if it already happened once"),
             (blur, "The Soft-Focus Romantic", "lets every note melt before it lands"),
             (shimmer, "The Basement Choir Director", "keeps an octave-down choir on standby"),
-            ((hyst + sag) / 2, "The Tape Whisperer", "can hear the reels turning"),
+            ((hyst + sag + wow + erase) / 3, "The Tape Whisperer", "can hear the reels turning"),
+            (cVoices * (0.5 + 0.5 * max(cDetune, cDelay)), "The Choir Conductor", "never listens to a song alone"),
+            ((fuzz + bloom + fur) / 2, "The Valve Hoarder", "keeps a warm tube amp humming in the corner"),
         ]
         switch meas.imdPercent {
         case ..<3:  like.append("Intermod: every instrument keeps to its own lane")
@@ -248,7 +267,20 @@ extension AppState {
         case -15..<(-5): like.append("Smear: a cathedral full of fog")
         default:       like.append("Smear: sound dissolving into a warm cloud")
         }
-        switch hyst + sag {
+        switch cVoices * 16 {
+        case ..<0.5: break
+        case ..<4:   like.append("Choir: a few friends singing along in the car")
+        case ..<10:  like.append("Choir: a school choir on the risers, a little nervous")
+        default:     like.append("Choir: a stadium singing the chorus back at the band")
+        }
+        switch fuzz + bloom + fur {
+        case ..<0.05: break
+        case ..<0.6:  like.append("Amp: a valve amp warming up in the corner")
+        case ..<1.5:  like.append("Amp: a bass cab pushing air across the room")
+        default:      like.append("Amp: a vintage fuzz pedal held together with tape")
+        }
+        if wow > 0.3 { like.append("Transport: a cassette deck with a tired belt") }
+        switch hyst + sag + erase {
         case ..<0.05: break
         case ..<0.4:  like.append("Tape: a mixtape that's only been played a few times")
         case ..<0.9:  like.append("Tape: a cassette that survived three summers on a dashboard")
@@ -276,7 +308,7 @@ extension AppState {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         (NSColor(waveColor).usingColorSpace(.sRGB) ?? .systemTeal).getHue(&h, saturation: &s, brightness: &b, alpha: &a)
 
-        return ListenerReport(macro: m, macroNote: macroNote, presetName: selectedPreset, thd100: thd100, thd1k: thd1k,
+        return ListenerReport(macro: m, macroNote: macroNote, presetName: "FX: \(selectedPreset)  ·  Emu: \(selectedEmuPreset)", thd100: thd100, thd1k: thd1k,
                               thdn100: meas.thdn100, thdn1k: meas.thdn1k, imdPercent: meas.imdPercent,
                               c50Db: meas.c50Db, centerTimeMs: meas.centerTimeMs,
                               evenOddDb: evenOdd, archetype: archetype, tagline: tagline,
@@ -349,7 +381,7 @@ struct ListenerReportCard: View {
             HStack(spacing: 16) {
                 pill(String(format: "MACRO %.0f%%", r.macro), r.macroNote)
                 pill("COZY INDEX \(r.cozyIndex)/100", cozyWord)
-                pill("PRESET", r.presetName)
+                pill("PRESETS", r.presetName)
             }
 
             ForEach(r.sections, id: \.title) { sec in

@@ -85,6 +85,7 @@ struct ContentView: View {
             HStack(spacing: 8) {
                 Group {
                     presetPicker
+                    emuPresetPicker
                     Divider().frame(height: 22)
                     qualityToggle
                     Divider().frame(height: 22)
@@ -186,7 +187,7 @@ struct ContentView: View {
 
     var presetPicker: some View {
         HStack(spacing: 4) {
-            Text("PRESET").font(.system(size: 9, design: .monospaced)).foregroundColor(Color(hex:"#8f8778"))
+            Text("FX").font(.system(size: 9, design: .monospaced)).foregroundColor(Color(hex:"#8f8778"))
                 .fixedSize()
             Picker("", selection: Binding(get: { app.selectedPreset }, set: { app.applyPreset(named: $0) })) {
                 Text(GlobalPreset.initName).tag(GlobalPreset.initName)
@@ -198,7 +199,25 @@ struct ContentView: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
-            .frame(width: 250)
+            .frame(width: 220)
+        }
+    }
+
+    var emuPresetPicker: some View {
+        HStack(spacing: 4) {
+            Text("EMULATION").font(.system(size: 9, design: .monospaced)).foregroundColor(Color(hex:"#8f8778"))
+                .fixedSize()
+            Picker("", selection: Binding(get: { app.selectedEmuPreset }, set: { app.applyEmulationPreset(named: $0) })) {
+                Text(EmulationPreset.offName).tag(EmulationPreset.offName)
+                ForEach(EmulationPreset.Vibe.allCases, id: \.self) { vibe in
+                    Section(header: Text(vibe.rawValue.uppercased())) {
+                        ForEach(EmulationPreset.presets(in: vibe), id: \.name) { p in Text(p.name).tag(p.name) }
+                    }
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 220)
         }
     }
 

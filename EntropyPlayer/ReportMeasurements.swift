@@ -66,6 +66,7 @@ enum ReportMeasurer {
         let th = TapeHysteresis(); th.setStrength(s.hysteresis)
         let sg = TapeSag(); sg.setStrength(s.sag)
         let er = TapeSelfErasure(); er.setStrength(s.erase)
+        let fs1 = SubsonicFilter(), fs2 = SubsonicFilter()
         let ta = TubeAmp(); ta.setFuzz(s.fuzz); ta.setBloom(s.bloom); ta.setFur(s.fur)
         let ro = HighRolloff(); ro.setSlope(dbPerOctave: s.rolloff)
         let dyn = WebAudioCompressor(); dyn.setSampleRate(sr)
@@ -94,6 +95,7 @@ enum ReportMeasurer {
                 sg.process(left: q, right: nil, count: c)
                 ta.process(left: q, right: nil, count: c)
                 for j in 0..<c { q[j] /= fixedDrive }     // fixed +7 dB is undone after the saturation stage
+                fs1.process(q, count: c, channel: 0); fs2.process(q, count: c, channel: 0)
                 dyn.process(left: q, right: nil, count: c)
                 i += c
             }

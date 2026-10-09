@@ -31,6 +31,7 @@ final class OfflineChain {
     private let ev = WebAudioSaturator(voicing: .even), od = WebAudioSaturator(voicing: .odd)
     private let th = TapeHysteresis(), sg = TapeSag(), ta = TubeAmp(), ro = HighRolloff()
     private let wf = TapeWowFlutter(), er = TapeSelfErasure()
+    private let fs1 = SubsonicFilter(), fs2 = SubsonicFilter()
     private let dyn = WebAudioCompressor(), ceiling = WebAudioCompressor()
     private let inGain: Float, fixedDrive: Float, postGain: Float
 
@@ -96,6 +97,8 @@ final class OfflineChain {
             wf.process(left: a, right: b, count: n)
             ta.process(left: a, right: b, count: n)
             for i in 0..<n { a[i] /= fixedDrive; b[i] /= fixedDrive }
+            fs1.process(a, count: n, channel: 0); fs1.process(b, count: n, channel: 1)
+            fs2.process(a, count: n, channel: 0); fs2.process(b, count: n, channel: 1)
             dyn.process(left: a, right: b, count: n)
             for i in 0..<n { a[i] *= postGain; b[i] *= postGain }
             ceiling.process(left: a, right: b, count: n)

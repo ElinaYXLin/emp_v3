@@ -10,13 +10,17 @@ struct RangeValue: Codable { var min: Double = 0; var max: Double = 100 }
 struct AppSettings: Codable {
     var waveColor:    String = "#35d6d0"
     var macro:        Double = 0
-    var sensitivity:  [String: Double] = GlobalPreset.initPreset.sensitivity
+    var sensitivity:  [String: Double] = AppSettings.defaultSensitivities
     var ranges:       [String: RangeValue] = [
         "reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init()
     ]
     var recipe:       String? = nil      // optional: older files predate recipes
     var order:        String = "alpha"
     var dynamics:     String = "limiter"
+
+    /// INIT FX preset + Off emulation preset.
+    static let defaultSensitivities = GlobalPreset.initPreset.sensitivity
+        .merging(EmulationPreset.off.sensitivity) { a, _ in a }
 
     /// Knobs added after older settings files/presets were written start at 0.
     static func defaultSensitivity(_ key: String) -> Double {
@@ -33,7 +37,7 @@ final class AppState: ObservableObject {
     @Published var macro: Double = 0              // 0–100
     @Published var preampDb: Double = 0           // -12…0
     @Published var postGainDb: Double = 0         // -24…48, final output volume trim/boost
-    @Published var sensitivity: [String: Double] = GlobalPreset.initPreset.sensitivity
+    @Published var sensitivity: [String: Double] = AppSettings.defaultSensitivities
     @Published var ranges: [String: RangeValue]  = ["reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init()]
     @Published var waveColor: Color = Color(hex: "#35d6d0")
     @Published var satRecipe: String = SaturatorRecipe.classic.name
@@ -47,6 +51,7 @@ final class AppState: ObservableObject {
     @Published var isExporting = false
     @Published var exportStatus: String? = nil
     @Published var selectedPreset: String = GlobalPreset.initName
+    @Published var selectedEmuPreset: String = EmulationPreset.offName
     @Published var dynamicsMode: AudioEngine.DynamicsMode = .limiter
     @Published var macroMode: MacroMode = .manual
     @Published var vibratoSpeed: VibratoSpeed = .slow
@@ -323,11 +328,20 @@ final class AppState: ObservableObject {
     func applyPreset(named name: String) {
         guard let p = GlobalPreset.named(name) else { return }
         selectedPreset = p.name
-        sensitivity = p.sensitivity
-        ranges = AppSettings().ranges
+        // FX knobs only; the Emulation page keeps its settings.
+        let defaults = AppSettings().ranges
+        for (k, v) in p.sensitivity { sensitivity[k] = v; ranges[k] = defaults[k] ?? .init() }
         satRecipe = p.recipe
         if macroMode != .manual { setMacroMode(.manual) }
         setMacro(p.macro)
+    }
+
+    /// Emulation knobs only; FX knobs, recipe and macro are untouched.
+    func applyEmulationPreset(named name: String) {
+        guard let p = EmulationPreset.named(name) else { return }
+        selectedEmuPreset = p.name
+        for (k, v) in p.sensitivity { sensitivity[k] = v; ranges[k] = .init() }
+        applyAllDSP()
     }
 
     func setRecipe(_ name: String) {
@@ -362,7 +376,7 @@ final class AppState: ObservableObject {
 
         waveColor   = Color(hex: s.waveColor)
         // Merge onto INIT so knobs added after the file was saved get their defaults.
-        sensitivity = GlobalPreset.initPreset.sensitivity.merging(s.sensitivity) { _, new in new }
+        sensitivity = AppSettings.defaultSensitivities.merging(s.sensitivity) { _, new in new }
         ranges      = AppSettings().ranges.merging(s.ranges) { _, new in new }
         satRecipe   = s.recipe ?? SaturatorRecipe.classic.name
         dynamicsMode = s.dynamics == "compressor" ? .compressor : .limiter

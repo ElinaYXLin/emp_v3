@@ -88,6 +88,11 @@ final class AudioEngine {
     private let oddSatFilter  = WebAudioSaturator(voicing: .odd)
     private let highRolloff   = HighRolloff()
     private let subsonic      = SubsonicFilter()
+    // Final 25 Hz cut (24 dB/oct, two Butterworth stages) after the whole
+    // chain: the even saturator's envelope-driven bias pumps at the kick
+    // rate, and the tape/tube stages after the first 25 Hz cut reshape that
+    // into 1–2 Hz wobble and woofer rattle.
+    private let finalSub1     = SubsonicFilter(), finalSub2 = SubsonicFilter()
     // Saturator recipe shaping and tape stages (see SaturatorRecipes.swift, Tape.swift).
     private let recipeStage   = RecipeStage()
     private let tapeHyst      = TapeHysteresis()
@@ -400,6 +405,8 @@ final class AudioEngine {
         vDSP_vsmul(l, 1, &gInv, l, 1, vDSP_Length(n))
         vDSP_vsmul(r, 1, &gInv, r, 1, vDSP_Length(n))
 
+        finalSub1.process(l, count: n, channel: 0); finalSub1.process(r, count: n, channel: 1)
+        finalSub2.process(l, count: n, channel: 0); finalSub2.process(r, count: n, channel: 1)
         compressor.process(left: l, right: r, count: n)
 
         var pg = postGainLinear

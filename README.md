@@ -43,8 +43,9 @@ Every effect knob is a **sensitivity**: how strongly the **Macro** slider drives
 Other controls:
 
 - **Pre-Amp** and **Post-Gain** sliders: input trim and clean output volume (Post-Gain goes up to +48 dB; the output ceiling still catches peaks).
-- **Limiter / Compressor**: the final dynamics stage, with an always-on safety ceiling after it.
-- **Presets**: 40 global presets grouped by vibe (Nostalgic, Calming, Inspiring, Dreamy, Playful), plus **INIT**, the defaults.
+- **Limiter / Compressor**: the final dynamics stage, with an always-on safety ceiling after it. Just before it, a 24 dB/oct high-pass at 25 Hz removes sub-bass pumping (1–2 Hz wobble, woofer rattle).
+- **FX presets**: 40 presets for the Effects page, grouped by vibe (Nostalgic, Calming, Inspiring, Dreamy, Playful), plus **INIT**. They set every Effects-page knob, the saturator recipe and the macro, and leave the Emulation page alone.
+- **Emulation presets**: 20 presets for Choir, Tape and Tube Amp, grouped by the same vibes, plus **Off**. They combine with any FX preset.
 - **Save / Load Settings**: store your knobs, ranges and recipe as JSON.
 - **Color** picker: the accent color used by the Listener Report.
 
@@ -105,8 +106,9 @@ Signal flow: **Choir → Spectral Haze → Temporal Haze → Color → Tape → 
 
 - **Score:** total harmonic distortion at 100 Hz and 1 kHz, measured through your current Color chain.
 - **More measurements:** THD+N, 5-tone intermodulation, and time smear (clarity C50 and centre time).
-- **Every setting as engineering values:** dB, Hz, ms and cents.
-- **For fun:** a listener "archetype", a Cozy Index, and "Sounds like…" comparisons, which are vibes, not science.
+- **Every setting as engineering values**, in signal-flow order: Choir, Spectral Haze, Temporal Haze, Color, Tape, Tube Amp and gain staging, in dB, Hz, ms and cents.
+- **Both presets** (FX and Emulation) on the card.
+- **For fun:** a listener "archetype" (now including the Choir Conductor and the Valve Hoarder), a Cozy Index, and "Sounds like…" comparisons, which are vibes, not science.
 
 ### Listening-level meter
 
@@ -138,7 +140,7 @@ EntropyPlayer/
   Choir.swift                ensemble of detuned, delayed, panned singers
   CustomEQ.swift             lo-mid bell, high roll-off, subsonic filter
   CustomDynamics.swift       limiter/compressor
-  Presets.swift              global presets
+  Presets.swift              FX and Emulation presets
   ListenerReport.swift       report card
   ReportMeasurements.swift   offline THD / intermod / smear measurements
   ListeningMeter.swift       dB(A) meter and exposure history
