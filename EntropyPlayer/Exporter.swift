@@ -25,7 +25,7 @@ final class OfflineChain {
     static let latency = 512 + 64 + 2048 + 88
 
     private let s: ChainSettings
-    private let gd = GroupDelay(), bl = SpectralBlur(), gr = GrainEcho()
+    private let gd = GroupDelay(), bl = SpectralBlur(), gr = GrainEcho(), ch = Choir()
     private let rv = ConvolutionReverb(), sh = Shimmer()
     private let eq = PeakingBiquad(), ss = SubsonicFilter(), rs = RecipeStage()
     private let ev = WebAudioSaturator(voicing: .even), od = WebAudioSaturator(voicing: .odd)
@@ -37,6 +37,7 @@ final class OfflineChain {
         self.s = s
         gd.setScale(s.gdScale); gd.setRandomness(s.gdRandom); gd.flushParameters()
         bl.setStrength(s.blur); gr.setStrength(s.grain)
+        ch.setVoices(s.choirVoices); ch.setDetune(s.choirDetune); ch.setDelay(s.choirDelay); ch.setVibrato(s.choirVibrato)
         rv.setDecay(s.reverbDecaySec); sh.setStrength(s.shimmer)
         eq.setParameters(frequency: 150, q: 0.1, gainDb: s.eqDb)
         rs.configure(s.recipe, amount: (s.evenDb + s.oddDb) / 16)
@@ -70,6 +71,7 @@ final class OfflineChain {
             gd.process(left: a, right: b, count: n)
             bl.process(left: a, right: b, count: n)
             gr.process(left: a, right: b, count: n)
+            ch.process(left: a, right: b, count: n)
             rv.process(left: a, right: b, count: n)
             sh.process(left: a, right: b, count: n)
             eq.process(a, count: n, channel: 0); eq.process(b, count: n, channel: 1)
@@ -205,6 +207,8 @@ extension AppState {
         cs.gdScale = eff("gd") * 20
         cs.gdRandom = eff("gdrand") * 0.5
         cs.blur = eff("blur"); cs.grain = eff("grain")
+        cs.choirVoices = eff("voices"); cs.choirDetune = eff("detune")
+        cs.choirDelay = eff("cdelay"); cs.choirVibrato = eff("cvib")
         cs.reverbDecaySec = pow(eff("reverb"), 1.5) * 60
         cs.shimmer = eff("shimmer")
         return cs

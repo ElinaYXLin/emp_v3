@@ -76,11 +76,12 @@ extension AppState {
         let hyst       = eff("hyst")
         let sag        = eff("sag")
         let fuzz = eff("fuzz"), bloom = eff("bloom"), fur = eff("fur")
+        let cVoices = eff("voices"), cDetune = eff("detune"), cDelay = eff("cdelay"), cVib = eff("cvib")
         let shimRT     = shimmer > 0 ? 0.095 * 3 / -log10(0.40 + 0.50 * shimmer) : 0   // loop trip / dB per trip → RT60
 
         var cs = ChainSettings()
         cs.preampDb = preampDb; cs.eqDb = eqDb; cs.evenDb = evenDb; cs.oddDb = oddDb
-        cs.recipe = recipe; cs.hysteresis = hyst; cs.sag = sag; cs.fuzz = fuzz; cs.bloom = bloom; cs.fur = fur; cs.rolloff = rollSlope
+        cs.recipe = recipe; cs.hysteresis = hyst; cs.sag = sag; cs.fuzz = fuzz; cs.bloom = bloom; cs.fur = fur; cs.choirVoices = cVoices; cs.choirDetune = cDetune; cs.choirDelay = cDelay; cs.choirVibrato = cVib; cs.rolloff = rollSlope
         cs.compressor = dynamicsMode == .compressor
         cs.gdScale = gdScale; cs.blur = blur; cs.grain = grain
         cs.reverbDecaySec = decaySec; cs.shimmer = shimmer
@@ -107,14 +108,17 @@ extension AppState {
                 .init(label: "Tape sag",       value: sag > 0.001
                       ? String(format: "%.0f%%: up to −%.1f dB dip, top → %.0f kHz, %.1f ms motor droop", sag * 100, -20 * log10(1 - 0.5 * sag), (18000 - 12000 * sag) / 1000, 4 * sag)
                       : "off"),
+                .init(label: "Choir",          value: cVoices > 0.001
+                      ? String(format: "%.1f singers, detune ±%.0f ct, delay to %.0f ms, vibrato ±%.0f ct @ 3–20 Hz", cVoices * 16, 35 * cDetune, 60 * cDelay, 40 * cVib)
+                      : "off"),
                 .init(label: "Tube fuzz",      value: fuzz > 0.001
-                      ? String(format: "%.0f%%: transformer flux drive %.1f×, ~5× heavier @ 40 Hz than 200 Hz, cab LP %.1f kHz", fuzz * 100, 3 * pow(fuzz, 1.3), (5000 - 1500 * fuzz) / 1000)
+                      ? String(format: "%.0f%%: transformer flux drive %.1f×, ~5× heavier @ 40 Hz than 200 Hz, cab LP %.1f kHz", fuzz * 100, 14 * pow(fuzz, 1.2), (4500 - 1500 * fuzz) / 1000)
                       : "off"),
                 .init(label: "Tube bloom",     value: bloom > 0.001
-                      ? String(format: "%.0f%%: bass-driven dip, %.0f ms recovery, mids take ¼", bloom * 100, 100 + 200 * bloom)
+                      ? String(format: "%.0f%%: bass-driven dip, %.0f ms recovery, mids take ⅓", bloom * 100, 100 + 200 * bloom)
                       : "off"),
                 .init(label: "Tube fur",       value: fur > 0.001
-                      ? String(format: "%.0f%%: bias shift after loud bass, up to ~%.0f soft crackles/s", fur * 100, 0.5 + 40 * fur * fur)
+                      ? String(format: "%.0f%%: bias shift after loud bass, up to ~%.0f soft crackles/s", fur * 100, 2 + 60 * fur * fur)
                       : "off"),
                 .init(label: "Subsonic cut",   value: "12 dB/oct below 25 Hz"),
             ]),

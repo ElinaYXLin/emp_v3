@@ -38,7 +38,7 @@ final class AudioEngine {
     // -3000), so audio leaves the graph through a tap on preampMixer and
     // re-enters through dspSourceNode, whose render callback runs the whole
     // chain inline:
-    //   group delay → spectral blur → grain echo → reverb → shimmer → EQ → +7 dB → 25 Hz high-pass → even sat → odd sat → high roll-off
+    //   group delay → spectral blur → grain echo → choir → reverb → shimmer → EQ → +7 dB → 25 Hz high-pass → even sat → odd sat → high roll-off
     //   (with recipe shaping around the saturators) → tape hysteresis → tape sag → tube amp
 //   → high roll-off → limiter/compressor → post-gain → output ceiling
     //
@@ -73,6 +73,7 @@ final class AudioEngine {
     // Granular memory haze (see GrainEcho.swift), between group delay and
     // the reverb so its grains blur into the reverb tail.
     private let grainEcho        = GrainEcho()
+    private let choir            = Choir()
     // Spectral haze: per-frequency level slew (see SpectralBlur.swift).
     private let spectralBlur     = SpectralBlur()
     // Temporal haze: octave-down feedback glow after the reverb (see Shimmer.swift).
@@ -360,6 +361,7 @@ final class AudioEngine {
         groupDelay.process(left: l, right: r, count: n)
         spectralBlur.process(left: l, right: r, count: n)
         grainEcho.process(left: l, right: r, count: n)
+        choir.process(left: l, right: r, count: n)
         reverbFilter.process(left: l, right: r, count: n)
         shimmer.process(left: l, right: r, count: n)
 
@@ -494,6 +496,12 @@ final class AudioEngine {
 
     /// Grain echo: effective 0–1 scales the haze level (up to 0 dB re dry),
     /// its memory window (up to 200 ms) and grain detune (±4→±35 cents) together.
+    /// Choir: effective 0–1 each for Voices, Detune, Delay, Vibrato (see Choir.swift).
+    func setChoir(voices: Float, detune: Float, delay: Float, vibrato: Float) {
+        choir.setVoices(Double(voices)); choir.setDetune(Double(detune))
+        choir.setDelay(Double(delay)); choir.setVibrato(Double(vibrato))
+    }
+
     func setGrainEcho(effective eff: Float) {
         grainEcho.setStrength(Double(eff))
     }
@@ -548,6 +556,7 @@ final class AudioEngine {
         oddSatFilter.setLowQuality(on)
         shimmer.setLowQuality(on)
         grainEcho.setLowQuality(on)
+        choir.setLowQuality(on)
     }
 
     /// Tape hysteresis: effective 0–1 (drive, loop width, head bump, top-end loss).

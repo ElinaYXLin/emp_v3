@@ -13,13 +13,13 @@ import Foundation
 //   and 1 kHz stays nearly clean. The knob raises the core drive, so the fuzz
 //   creeps up from the lowest notes and its low-vs-high gradient steepens.
 //   Only the fuzz *products* (output − input) pass through a speaker/cabinet
-//   low-pass (2-pole, 5 kHz → 3.5 kHz with the knob), so the fuzz is round
+//   low-pass (2-pole, 4.5 kHz → 3 kHz with the knob), so the fuzz is round
 //   and woolly; the clean signal is untouched.
 //
 // Bloom — bass-driven supply sag. A bass-band envelope (< ~150 Hz) pulls the
 //   gain down quickly on each hit; it then recovers over 100–300 ms (slower
 //   as the knob rises). The bass band takes the full dip, the rest of the
-//   spectrum a quarter of it, so the whole amp breathes with the kick.
+//   spectrum about a third of it, so the whole amp breathes with the kick.
 //
 // Fur — bias shift. Loud bass charges a slow "bias" envelope; while it
 //   discharges (the decay after a loud note) the fuzz core is pushed
@@ -37,7 +37,7 @@ final class TubeAmp {
     private var tFuzz = 0.0, tBloom = 0.0, tFur = 0.0
     private var fuzz = 0.0, bloom = 0.0, fur = 0.0
 
-    private struct Chan { var flux = 0.0, fluxSatPrev = 0.0, cab1 = 0.0, cab2 = 0.0, lowA = 0.0, lowB = 0.0, crackle = 0.0 }
+    private struct Chan { var flux = 0.0, fluxEnv = 0.0, cab1 = 0.0, cab2 = 0.0, lowA = 0.0, lowB = 0.0, crackle = 0.0 }
     private var c0 = Chan(), c1 = Chan()
     // Shared (stereo-linked)
     private var bassEnv = 0.0, biasEnv = 0.0, gain = 1.0
@@ -61,19 +61,20 @@ final class TubeAmp {
         let g = 1 - exp(-Double(count) / (0.05 * sr))
         fuzz += (tf - fuzz) * g; bloom += (tb - bloom) * g; fur += (tu - fur) * g
 
-        let drive = 3.0 * pow(fuzz, 1.3)                          // core drive
-        let cabHz = 5000 - 1500 * fuzz
+        let drive = 14.0 * pow(fuzz, 1.2)                          // core drive
+        let cabHz = 4500 - 1500 * fuzz
         let cab = 1 - exp(-2 * Double.pi * cabHz / sr)
         let lowC = 1 - exp(-2 * Double.pi * 150 / sr)
         let envAtk = 1 - exp(-1 / (0.005 * sr)), envRel = 1 - exp(-1 / (0.060 * sr))
         let biasAtk = 1 - exp(-1 / (0.030 * sr)), biasRel = 1 - exp(-1 / (0.600 * sr))
         let dipAtk = 1 - exp(-1 / (0.008 * sr))
         let dipRel = 1 - exp(-1 / ((0.100 + 0.200 * bloom) * sr))
-        let depth = 2.5 * bloom
-        let crackRate = (0.5 + 40 * fur * fur) / sr                // events/sample at full decay
-        let crackLevel = 0.04 + 0.16 * fur
-        let crackDecay = exp(-1 / (0.0004 * sr))
-        let biasShift = 0.35 * fur
+        let depth = 24 * bloom * (0.5 + 0.5 * bloom)
+        let crackRate = (2 + 60 * fur * fur) / sr                // events/sample at full decay
+        let crackLevel = 0.25 + 1.0 * fur
+        let crackDecay = exp(-1 / (0.0012 * sr))
+        let biasShift = 1.2 * fur
+        let fluxAtk = 1 - exp(-1 / (0.002 * sr)), fluxRel = 1 - exp(-1 / (0.150 * sr))
         var a = c0, b = c1, rg = rng
 
         for i in 0..<count {
@@ -88,7 +89,7 @@ final class TubeAmp {
             // Bloom: quick dip, slow recovery.
             let target = 1 / (1 + depth * bassEnv)
             gain += (target < gain ? dipAtk : dipRel) * (target - gain)
-            let midGain = 1 - 0.25 * (1 - gain)
+            let midGain = 1 - 0.35 * (1 - gain)
 
             // Fur: how far into a post-loud-bass decay we are.
             let decay = biasEnv > 1e-4 ? max(0, (biasEnv - bassEnv) / biasEnv) : 0
@@ -96,14 +97,26 @@ final class TubeAmp {
 
             func run(_ c: inout Chan, _ x: Double) -> Double {
                 // Transformer fuzz.
+                let prev = c.flux
                 c.flux = leak * c.flux + k * x
                 var products = 0.0
-                if drive > 1e-4 {
-                    let sat = (tanh(drive * (c.flux + bias)) - tanh(drive * bias)) / drive
-                    products = (sat - leak * c.fluxSatPrev) / k - x       // exact inverse of the integrator
-                    c.fluxSatPrev = sat
-                } else {
-                    c.fluxSatPrev = c.flux
+                // Saturation depth cap: on very loud sub-bass the core would
+                // saturate so deeply it only conducts in brief bursts near
+                // the flux zero crossings, whose edges click. Cap drive×flux
+                // at 2.5 and always keep a 20 % linear path, so the fuzz
+                // stays thick and woolly instead of turning into a pulse train.
+                let af = abs(c.flux)
+                c.fluxEnv += (af > c.fluxEnv ? fluxAtk : fluxRel) * (af - c.fluxEnv)
+                let dEff = min(drive, 2.5 / max(c.fluxEnv, 1e-6))
+                if dEff > 1e-4 {
+                    // Both samples go through the *same* curve (this sample's
+                    // drive and bias). Reusing the previous sample's stored
+                    // output instead turned every drive/bias change into a
+                    // step, which the ÷k differentiator blew up into a pop.
+                    let m = 0.2, off = tanh(dEff * bias)
+                    let sat  = (1 - m) * (tanh(dEff * (c.flux + bias)) - off) / dEff + m * c.flux
+                    let satP = (1 - m) * (tanh(dEff * (prev + bias)) - off) / dEff + m * prev
+                    products = (sat - leak * satP) / k - x                // exact inverse of the integrator
                 }
                 // Bias-shift crackle.
                 if fur > 1e-4 && decay > 0.05 {
@@ -119,7 +132,7 @@ final class TubeAmp {
                 // Speaker/cabinet low-pass on the fuzz products only.
                 c.cab1 += cab * (products - c.cab1)
                 c.cab2 += cab * (c.cab1 - c.cab2)
-                // Bloom: bass band takes the full dip, the rest a quarter.
+                // Bloom: bass band takes the full dip, the rest about a third.
                 let wet = x + c.cab2
                 return c.lowB * gain + (wet - c.lowB) * midGain
             }

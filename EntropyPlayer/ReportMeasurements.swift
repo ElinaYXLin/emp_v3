@@ -29,6 +29,7 @@ struct ChainSettings {
     var recipe = SaturatorRecipe.classic
     var hysteresis = 0.0, sag = 0.0
     var fuzz = 0.0, bloom = 0.0, fur = 0.0
+    var choirVoices = 0.0, choirDetune = 0.0, choirDelay = 0.0, choirVibrato = 0.0
     var rolloff = 0.0
     var compressor = false
     // Haze
@@ -104,6 +105,8 @@ enum ReportMeasurer {
         let gd = GroupDelay(); gd.setScale(s.gdScale); gd.flushParameters()
         let bl = SpectralBlur(); bl.setStrength(s.blur)
         let gr = GrainEcho(); gr.setStrength(s.grain)
+        let ch = Choir(); ch.setVoices(s.choirVoices); ch.setDetune(s.choirDetune)
+        ch.setDelay(s.choirDelay); ch.setVibrato(s.choirVibrato)
         let rv = ConvolutionReverb(); rv.setDecay(s.reverbDecaySec)
         let sh = Shimmer(); sh.setStrength(s.shimmer)
         var l = input, r = input
@@ -115,6 +118,7 @@ enum ReportMeasurer {
                     gd.process(left: a, right: b, count: c)
                     bl.process(left: a, right: b, count: c)
                     gr.process(left: a, right: b, count: c)
+                    ch.process(left: a, right: b, count: c)
                     rv.process(left: a, right: b, count: c)
                     sh.process(left: a, right: b, count: c)
                     i += c

@@ -435,7 +435,16 @@ struct ContentView: View {
     var emulationPage: some View {
         page("Emulation") {
             HStack(alignment: .top, spacing: 22) {
-                knobGroup("Choir") { comingSoon("Choir ensemble: many slightly loose voices for a bigger, human sound.") }
+                knobGroup("Choir") {
+                    knobRow(key: "voices", label: "Voices",  sub: "Singers",
+                            display: { "\(Int(($0 / 100 * 16).rounded()))" })
+                    knobRow(key: "detune", label: "Detune",  sub: "± cents",
+                            display: { "\(Int(($0 / 100 * 35).rounded())) ct" })
+                    knobRow(key: "cdelay", label: "Delay",   sub: "Spread",
+                            display: { "\(Int(($0 / 100 * 60).rounded())) ms" })
+                    knobRow(key: "cvib",   label: "Vibrato", sub: "3–20 Hz",
+                            display: { "\(Int(($0 / 100 * 40).rounded())) ct" })
+                }
                 knobGroup("Tape") {
                     knobRow(key: "hyst", label: "Hysteresis", sub: "Tape memory",
                             display: { "\(Int($0))%" })
@@ -452,20 +461,6 @@ struct ContentView: View {
                 }
             }
         }
-    }
-
-    func comingSoon(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("NOT BUILT YET")
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundColor(Color(hex: "#c65a2e"))
-            Text(text)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(Color(hex: "#8f8778"))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 2).stroke(Color(hex: "#8f8778").opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
     }
 
     func knobGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

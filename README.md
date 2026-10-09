@@ -50,7 +50,7 @@ Other controls:
 
 ### Effects
 
-Signal flow: **Spectral Haze → Temporal Haze → Color → dynamics → output**. Every effect is level-matched, so turning one up doesn't simply make things louder or push the limiter. The Lo-Mid EQ and High Roll-off are the exceptions, since changing tone is their job.
+Signal flow: **Spectral Haze → Temporal Haze (Choir sits just before the reverb) → Color → Tape → Tube Amp → dynamics → output**. Every effect is level-matched, so turning one up doesn't simply make things louder or push the limiter. The Lo-Mid EQ and High Roll-off are the exceptions, since changing tone is their job.
 
 **Color**
 | Knob | What it does |
@@ -81,11 +81,19 @@ Signal flow: **Spectral Haze → Temporal Haze → Color → dynamics → output
 | Hysteresis | Tape magnetic "memory": rounded, slightly compressed response with a head bump |
 | Tape Sag | Loud passages make the tape dip in level, dull and briefly droop in pitch |
 
+**Choir** (Emulation page)
+| Knob | What it does |
+|---|---|
+| Voices | Up to 16 virtual singers, each replaying the music from its own fixed stereo position and distance (farther = quieter, darker, later) |
+| Detune | Each singer holds a pitch offset within ±d (up to ±35 cents) around its own fixed "tendency" (−d/2…+d/2), gliding to a new random offset every 10 s |
+| Delay | Each singer's delay (up to 60 ms) wanders the same way, with its own tendency |
+| Vibrato | Per-singer pitch vibrato up to ±40 cents, at a rate that wanders between 3 and 20 Hz |
+
 **Tube Amp** (Emulation page)
 | Knob | What it does |
 |---|---|
-| Fuzz | Transformer saturation on magnetic flux, so low notes fuzz far more than high ones (40 Hz much more than 200 Hz); the fuzz alone is low-passed like a speaker cabinet (5 → 3.5 kHz) to stay round and woolly |
-| Bloom | Each bass hit briefly dips the level, then it blooms back over 100–300 ms (stronger and slower as the knob rises); the mids take a quarter of the dip, so the amp breathes with the kick |
+| Fuzz | Transformer saturation on magnetic flux, so low notes fuzz far more than high ones (40 Hz much more than 200 Hz); the fuzz alone is low-passed like a speaker cabinet (4.5 → 3 kHz) to stay round and woolly |
+| Bloom | Each bass hit briefly dips the level, then it blooms back over 100–300 ms (stronger and slower as the knob rises); the mids take about a third of the dip, so the amp breathes with the kick |
 | Fur | After loud bass the fuzz bias drifts, so decays crackle softly; higher is louder and more frequent |
 
 ### Listener Report
@@ -124,6 +132,7 @@ EntropyPlayer/
   SaturatorRecipes.swift     recipe definitions and shaping stage
   Tape.swift                 tape hysteresis and sag
   TubeAmp.swift              transformer fuzz, bass bloom, bias-shift fur
+  Choir.swift                ensemble of detuned, delayed, panned singers
   CustomEQ.swift             lo-mid bell, high roll-off, subsonic filter
   CustomDynamics.swift       limiter/compressor
   Presets.swift              global presets
