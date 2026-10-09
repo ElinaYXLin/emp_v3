@@ -372,9 +372,9 @@ final class AudioEngine {
         groupDelay.process(left: l, right: r, count: n)
         spectralBlur.process(left: l, right: r, count: n)
         grainEcho.process(left: l, right: r, count: n)
-        reverbFilter.process(left: l, right: r, count: n)
         shimmer.process(left: l, right: r, count: n)
         depth.process(left: l, right: r, count: n)
+        reverbFilter.process(left: l, right: r, count: n)
 
         eqFilter.process(l, count: n, channel: 0)
         eqFilter.process(r, count: n, channel: 1)
@@ -576,6 +576,7 @@ final class AudioEngine {
         recipeStage.setLowQuality(on)
         oddSatFilter.setLowQuality(on)
         shimmer.setLowQuality(on)
+        depth.setLowQuality(on)
         grainEcho.setLowQuality(on)
         choir.setLowQuality(on)
     }
@@ -592,8 +593,6 @@ final class AudioEngine {
 
     /// Depth (undertones): effective 0–1 (see Depth.swift).
     func setDepth(effective eff: Float) { depth.setAmount(Double(eff)) }
-    /// Depth swell/linger follow the Shimmer knob.
-    func setDepthBlur(effective eff: Float) { depth.setBlur(Double(eff)) }
     /// Four-band EQ gains in dB: low, mid, high-mid, high.
     func setBandEQ(db: [Double]) { bandEQ.setGains(db: db) }
 

@@ -126,10 +126,10 @@ extension AppState {
                       : String(format: "%.2f s RT", decaySec)),
                 .init(label: "Reverb color",  value: "wet 0.8 / dry 0.6, tail darkens 7k→1.2k Hz"),
                 .init(label: "Shimmer",       value: shimmer > 0.001
-                      ? String(format: "−1 octave glow, %.1f dB re dry, ~%.1f s sustain, lags %.0f–%.0f ms (drifting)", shimMixDb, shimRT, 120 * shimmer, 200 * shimmer)
+                      ? String(format: "−1 octave glow, %.1f dB re dry, ~%.1f s sustain, arrives ~12 ms after the note", shimMixDb, shimRT)
                       : "off"),
                 .init(label: "Depth",         value: depthAmt > 0.001
-                      ? String(format: "%.0f%%: undertones of 0.7–5 kHz down to f/%d, %.2f s swell / %.1f s linger, LP 1.1 kHz", depthAmt * 100, 1 + Int((depthAmt * 4).rounded(.up)), 0.05 + 0.25 * shimmer, 0.3 + 1.7 * shimmer)
+                      ? String(format: "%.0f%%: shimmer-style glow of undertones f/3…f/%d cascading in 18→50 ms after the note, high-passed at 25 Hz", depthAmt * 100, 2 + max(1, Int((depthAmt * 6).rounded(.up))))
                       : "off (original note only)"),
                 .init(label: "Grain echo",    value: grain > 0.001
                       ? String(format: "%.0f ms memory, %.0f ms grains ±%.0f¢, %.1f dB re dry", grainMemMs, grainLenMs, grainCents, grainMixDb)

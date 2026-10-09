@@ -52,7 +52,7 @@ Other controls:
 
 ### Effects
 
-Signal flow: **Choir → Spectral Haze → Temporal Haze → Color → Tape → Tube Amp → dynamics → output**. Every effect is level-matched, so turning one up doesn't simply make things louder or push the limiter. The Lo-Mid EQ and High Roll-off are the exceptions, since changing tone is their job.
+Signal flow: **Choir → Spectral Haze → Temporal Haze (Grain Echo → Shimmer → Depth → Reverb, so the shimmer and undertones are reverberated) → Color → Tape → Tube Amp → dynamics → output**. Every effect is level-matched, so turning one up doesn't simply make things louder or push the limiter. The Lo-Mid EQ and High Roll-off are the exceptions, since changing tone is their job.
 
 **Color**
 | Knob | What it does |
@@ -73,8 +73,8 @@ Signal flow: **Choir → Spectral Haze → Temporal Haze → Color → Tape → 
 | Knob | What it does |
 |---|---|
 | Reverb | Convolution reverb with a tail that darkens as it decays; the knob is quadratic for fine control |
-| Shimmer | Octave-down feedback glow under the music. It lags the music by up to 200 ms (more as the knob rises) and that lag drifts, so the glow gently stretches and sways instead of sounding mechanical |
-| Depth | Undertones (f/2, f/3, f/4, f/5) of the 700 Hz–5 kHz band, made in the frequency domain (~23 ms behind) and heavily blurred so they swell in and linger like a pad (swell and linger follow the Shimmer knob), and low-passed at 1.1 kHz so they stay round; 0 is the original note only, and each step up adds a deeper undertone |
+| Shimmer | Octave-down (f/2) feedback glow under the music, arriving ~12 ms after the note |
+| Depth | Shimmer's engine pitched further down: a glow of undertones f/3, f/4 … f/8 (Shimmer itself is f/2), high-passed at 25 Hz. The undertones cascade in time: f/3 arrives ~18 ms after the note, down to f/8 at 50 ms. The knob fades the undertones in one at a time; 0 is the original note only |
 | Grain Echo | Short detuned grains replayed from the last ≤200 ms, like music echoing from memory |
 
 **Recipes and Tape** (Saturator Recipes on the Effects page; Hysteresis and Tape Sag on Emulation › Tape)

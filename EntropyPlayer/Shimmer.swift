@@ -1,6 +1,6 @@
 import Foundation
 
-// Downward Shimmer: the (reverberated) signal is pitched down an octave,
+// Downward Shimmer: the signal is pitched down an octave,
 // diffused, darkened and fed back into itself, building a warm, deep glow
 // under the music — the inverse of the classic bright "shimmer" reverb,
 // which tends to sound piercing. Each trip round the loop drops another
@@ -9,7 +9,9 @@ import Foundation
 //
 // One strength control (0…1) scales both how loud the glow is (up to 0 dB
 // re dry) and how long it sustains: the diffused glow recirculates at its
-// own pitch (sustain 0.40 → 0.90 per ~95 ms trip) and a
+// own pitch (sustain 0.35 → 0.75 per ~95 ms trip, through a slowly
+// wandering ±3 ms loop delay and a 3 kHz damping filter so the loop never
+// rings like a fixed resonator) and a
 // smaller share (up to 0.08) goes back through the shifter for the next
 // octave down. Their sum stays below 1, so the loop is always stable.
 //
@@ -17,21 +19,22 @@ import Foundation
 // 0.5 samples/sample (→ half speed), half a cycle apart, crossfaded with
 // sin² windows that always sum to 1. Realtime-safe: fixed buffers only.
 //
-// Looseness: the shifter reads from a wandering extra delay, so the glow
-// lags the music by up to 200 ms (scaling with strength) and that lag
-// drifts to a new random point every 1.5–4 s. The drift gently stretches
-// and compresses the octave-down waveform (a slight, slow pitch sway), and
-// a soft saturation in the loop roughens it a touch, so the shimmer feels
-// played rather than mechanical.
+// Timing: the octave-down glow arrives ~12 ms after the note (23 ms
+// shifter window plus a fixed delay); Depth's deeper undertones cascade in
+// later, up to 50 ms for f/8 (see Depth.swift). A soft saturation in the
+// loop roughens the glow a touch so it isn't glassy-clean. (The wandering
+// "looseness" lag is still available via maxLagSec but is off.)
 final class Shimmer {
 
     private static let sampleRate = 44100.0
     private static let maxMix = 1.0
-    private static let window = 2048.0               // shifter window, ~46 ms
     private static let shiftSize = 1 << 14             // room for the 200 ms looseness delay
     private static let apDelays: [[Int]] = [[556, 441, 341, 225], [579, 464, 356, 248]]
-    private static let apGain: Float = 0.6
-    private static let loopDelay = 2600              // ~59 ms before feeding back
+    private static let apGain: Float = 0.5
+    private static let loopDelay = 2600              // ~59 ms before feeding back (centre)
+    private static let dampCoef = Float(1 - exp(-2 * Double.pi * 3000 / 44100))
+    private static let loopSize = 4096               // room for the modulated read
+    private static let loopMod = 130.0               // ±3 ms slow wander of the loop delay
 
     private let lock = NSLock()
     private var targetStrength: Double = 0
@@ -43,7 +46,17 @@ final class Shimmer {
 
     private let shiftBuf = UnsafeMutablePointer<Float>.allocate(capacity: Shimmer.shiftSize)
     private var shiftWrite = 0
-    private var shiftPhase = 0.0
+    // Pitch ratios read from the shared delay line (Shimmer: ½; Depth: ⅓…⅛).
+    private let ratios: UnsafeMutablePointer<Double>
+    private let phases: UnsafeMutablePointer<Double>
+    private let ratioCount: Int
+    private let cascade: Bool            // feed the glow back through the shifter (next octave down)
+    private let progressive: Bool        // knob fades ratios in one at a time
+    private let window: Double           // shifter window (samples); average added delay ≈ half of it
+    private let maxLagSec: Double        // the wandering "looseness" lag at full strength
+    private let extraDelay: UnsafeMutablePointer<Double>   // per ratio, samples (the undertone cascade)
+    private let ratioLPCoef: UnsafeMutablePointer<Float>    // per ratio 2-pole low-pass (1 = off)
+    private let ratioLP: UnsafeMutablePointer<Float>        // per ratio filter state, 2 each
     private var lagFrom = 0.8, lagTo = 0.8, lagPos = 0.0, lagLen = 88200.0, lagRng: UInt64 = 0x51A3_70E1_D00D_F00D
 
     // Per channel: 4 allpasses + a loop delay.
@@ -51,22 +64,51 @@ final class Shimmer {
     private var apIdx = [[Int]](repeating: [0, 0, 0, 0], count: 2)
     private let loopBuf: [UnsafeMutablePointer<Float>]
     private var loopIdx = 0
+    private var modPh = (0.0, 0.37)                    // loop-delay LFO phases (L, R)
+    private var damp: (Float, Float) = (0, 0)          // treble damping inside the loop
 
     private var lpState: Float = 0, hpState: Float = 0, hpPrev: Float = 0
     private let lpCoef = Float(1 - exp(-2 * Double.pi * 2500 / 44100))
-    private let hpCoef = Float(exp(-2 * Double.pi * 60 / 44100))
+    private let hpCoef: Float
 
-    init() {
+    /// ratios: pitch ratios to generate (default one octave down). hpHz: the
+    /// glow's high-pass. cascade: feed the glow back through the shifter for
+    /// further octaves. progressive: the knob fades the ratios in one by one.
+    init(ratios rs: [Double] = [0.5], hpHz: Double = 60, cascade: Bool = true, progressive: Bool = false,
+         window: Double = 1024, maxLagSec: Double = 0, delaysMs: [Double]? = [12], lowPassHz: [Double]? = nil) {
+        self.window = window
+        self.maxLagSec = maxLagSec
+        // Each ratio's average delay behind the note: the shifter itself adds
+        // ~4 + W/2 samples, the rest is a fixed extra delay.
+        extraDelay = UnsafeMutablePointer<Double>.allocate(capacity: rs.count)
+        ratioLPCoef = UnsafeMutablePointer<Float>.allocate(capacity: rs.count)
+        ratioLP = UnsafeMutablePointer<Float>.allocate(capacity: rs.count * 2)
+        ratioLP.initialize(repeating: 0, count: rs.count * 2)
+        for k in 0..<rs.count {
+            if let hz = lowPassHz?[k] { ratioLPCoef[k] = Float(1 - exp(-2 * Double.pi * hz / 44100)) } else { ratioLPCoef[k] = 1 }
+        }
+        let built = 4 + window / 2
+        for k in 0..<rs.count {
+            let target = (delaysMs?[k] ?? 0) / 1000 * 44100
+            extraDelay[k] = max(0, target - built)
+        }
+        ratioCount = rs.count
+        ratios = UnsafeMutablePointer<Double>.allocate(capacity: rs.count)
+        phases = UnsafeMutablePointer<Double>.allocate(capacity: rs.count)
+        for (k, v) in rs.enumerated() { ratios[k] = v; phases[k] = Double(k) / Double(rs.count) }
+        hpCoef = Float(exp(-2 * Double.pi * hpHz / 44100))
+        self.cascade = cascade
+        self.progressive = progressive
         func buf(_ c: Int) -> UnsafeMutablePointer<Float> {
             let p = UnsafeMutablePointer<Float>.allocate(capacity: c); p.initialize(repeating: 0, count: c); return p
         }
         shiftBuf.initialize(repeating: 0, count: Self.shiftSize)
         apBufs = Self.apDelays.map { $0.map { buf($0) } }
-        loopBuf = [buf(Self.loopDelay), buf(Self.loopDelay)]
+        loopBuf = [buf(Self.loopSize), buf(Self.loopSize)]
     }
 
     deinit {
-        shiftBuf.deallocate()
+        shiftBuf.deallocate(); ratios.deallocate(); phases.deallocate(); extraDelay.deallocate(); ratioLPCoef.deallocate(); ratioLP.deallocate()
         apBufs.flatMap { $0 }.forEach { $0.deallocate() }
         loopBuf.forEach { $0.deallocate() }
     }
@@ -83,8 +125,9 @@ final class Shimmer {
         for (ch, bufs) in apBufs.enumerated() {
             for (a, b) in bufs.enumerated() { b.assign(repeating: 0, count: Self.apDelays[ch][a]) }
         }
-        loopBuf.forEach { $0.assign(repeating: 0, count: Self.loopDelay) }
+        loopBuf.forEach { $0.assign(repeating: 0, count: Self.loopSize) }; damp = (0, 0)
         lpState = 0; hpState = 0; hpPrev = 0
+        ratioLP.assign(repeating: 0, count: ratioCount * 2)
     }
 
     @inline(__always) private func readShift(_ delay: Double) -> Float {
@@ -108,7 +151,7 @@ final class Shimmer {
 
         let glide = 1 - exp(-1 / (0.05 * Self.sampleRate))
         let mask = Self.shiftSize - 1
-        let W = Self.window, slope = 0.5 / W          // phase advance per sample for ratio 0.5
+        let W = window
         func lagRand() -> Double {
             lagRng ^= lagRng << 13; lagRng ^= lagRng >> 7; lagRng ^= lagRng << 17
             return Double(lagRng >> 11) / Double(1 << 53)
@@ -116,22 +159,29 @@ final class Shimmer {
 
         for i in 0..<count {
             strength += (target - strength) * glide
-            let sustain = Float(0.40 + 0.50 * strength)
-            let octaveFb = Float(0.08 * strength)
+            let sustain = Float(0.35 + 0.40 * strength)
+            let octaveFb = cascade ? Float(0.08 * strength) : 0
             let mix = Float(strength * Self.maxMix)
 
             let l = left[i], r = right?[i] ?? l
             // Loop input: dry mono + fed-back glow.
-            let fbL = loopBuf[0][loopIdx], fbR = loopBuf[1][loopIdx]
+            // Loop read with a slowly wandering delay (different rate per side)
+            // so the loop's resonances never settle into a metallic ring, and
+            // damp the treble on every trip.
+            modPh.0 += 0.31 / Self.sampleRate; if modPh.0 >= 1 { modPh.0 -= 1 }
+            modPh.1 += 0.43 / Self.sampleRate; if modPh.1 >= 1 { modPh.1 -= 1 }
+            func loopRead(_ b: UnsafeMutablePointer<Float>, _ ph: Double) -> Float {
+                let d = Double(Self.loopDelay) + Self.loopMod * sin(2 * Double.pi * ph)
+                let pos = Double(loopIdx) - d, fl = pos.rounded(.down), fr = Float(pos - fl)
+                let i0 = Int(fl) & (Self.loopSize - 1), i1 = (i0 + 1) & (Self.loopSize - 1)
+                return b[i0] + (b[i1] - b[i0]) * fr
+            }
+            damp.0 += Self.dampCoef * (loopRead(loopBuf[0], modPh.0) - damp.0)
+            damp.1 += Self.dampCoef * (loopRead(loopBuf[1], modPh.1) - damp.1)
+            let fbL = damp.0, fbR = damp.1
             shiftBuf[shiftWrite & mask] = (l + r) * 0.5 + octaveFb * (fbL + fbR) * 0.5
             shiftWrite &+= 1
 
-            // Octave-down shifter.
-            let p1 = shiftPhase, p2 = (shiftPhase + 0.5).truncatingRemainder(dividingBy: 1)
-            // High: exact sin² crossfade. Low: parabola 4p(1−p) ≈ sin(πp),
-            // skipping two sin() calls per sample.
-            let g1 = lowQuality ? Float(4 * p1 * (1 - p1)) : Float(sin(Double.pi * p1))
-            let g2 = lowQuality ? Float(4 * p2 * (1 - p2)) : Float(sin(Double.pi * p2))
             // Wandering lag: 0.6–1.0 × (200 ms × strength), cosine glides.
             lagPos += 1
             if lagPos >= lagLen {
@@ -140,13 +190,37 @@ final class Shimmer {
                 lagLen = (1.5 + 2.5 * lagRand()) * Self.sampleRate
             }
             let e = 0.5 - 0.5 * cos(Double.pi * lagPos / lagLen)
-            let lag = (lagFrom + (lagTo - lagFrom) * e) * 0.200 * Self.sampleRate * strength
-            var y = readShift(4 + lag + p1 * W) * g1 * g1 + readShift(4 + lag + p2 * W) * g2 * g2
+            let lag = (lagFrom + (lagTo - lagFrom) * e) * maxLagSec * Self.sampleRate * strength
+
+            // Pitch shifters (one per ratio), sharing the delay line. High
+            // quality: exact sin² crossfade. Low: parabola 4p(1−p) ≈ sin(πp).
+            var y: Float = 0, gSum: Float = 0
+            for k in 0..<ratioCount {
+                var gk: Float = 1
+                if progressive {
+                    gk = Float(min(1, max(0, strength * Double(ratioCount) - Double(k))))
+                    if gk == 0 { phases[k] += (1 - ratios[k]) / W; if phases[k] >= 1 { phases[k] -= 1 }; continue }
+                }
+                let p1 = phases[k], p2 = p1 + 0.5 - (p1 >= 0.5 ? 1 : 0)
+                let g1 = lowQuality ? Float(4 * p1 * (1 - p1)) : Float(sin(Double.pi * p1))
+                let g2 = lowQuality ? Float(4 * p2 * (1 - p2)) : Float(sin(Double.pi * p2))
+                let d0 = 4 + lag + extraDelay[k]
+                var v = readShift(d0 + p1 * W) * g1 * g1 + readShift(d0 + p2 * W) * g2 * g2
+                let c = ratioLPCoef[k]
+                if c < 1 {                                       // this undertone's own low-pass
+                    ratioLP[2 * k] += c * (v - ratioLP[2 * k])
+                    ratioLP[2 * k + 1] += c * (ratioLP[2 * k] - ratioLP[2 * k + 1])
+                    v = ratioLP[2 * k + 1]
+                }
+                y += v * gk
+                gSum += gk * gk
+                phases[k] += (1 - ratios[k]) / W
+                if phases[k] >= 1 { phases[k] -= 1 }
+            }
+            if gSum > 1 { y /= gSum.squareRoot() }               // several undertones: keep the glow's level
             // A touch of soft saturation so the glow isn't glassy-clean.
             let drive = Float(1 + 1.5 * strength)
             y = Float(tanh(Double(y * drive))) / drive
-            shiftPhase += slope
-            if shiftPhase >= 1 { shiftPhase -= 1 }
 
             // Darken + keep out of the sub-bass.
             lpState += lpCoef * (y - lpState)
@@ -173,7 +247,7 @@ final class Shimmer {
 
             loopBuf[0][loopIdx] = outs.0
             loopBuf[1][loopIdx] = outs.1
-            loopIdx = loopIdx + 1 == Self.loopDelay ? 0 : loopIdx + 1
+            loopIdx = (loopIdx + 1) & (Self.loopSize - 1)
 
             // Level compensation (measured on pink noise): the sustained glow
             // otherwise adds up to ~4.3 dB at full strength.

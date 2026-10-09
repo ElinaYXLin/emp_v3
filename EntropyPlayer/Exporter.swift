@@ -47,7 +47,7 @@ final class OfflineChain {
         ev.setDrive(driveDb: min(24, s.evenDb * s.recipe.evenMul)); ev.setBias(s.recipe.bias); ev.setWobble(s.wobble)
         od.setDrive(driveDb: min(24, s.oddDb * s.recipe.oddMul))
         th.setStrength(s.hysteresis); sg.setStrength(s.sag); ro.setSlope(dbPerOctave: s.rolloff)
-        dp.setAmount(s.depth); dp.setBlur(s.shimmer); beq.setGains(db: s.bandEQ)
+        dp.setAmount(s.depth); beq.setGains(db: s.bandEQ)
         wf.setStrength(s.wow); er.setStrength(s.erase)
         ta.setFuzz(s.fuzz); ta.setBloom(s.bloom); ta.setFur(s.fur)
         dyn.setSampleRate(Self.sampleRate)
@@ -77,9 +77,9 @@ final class OfflineChain {
             gd.process(left: a, right: b, count: n)
             bl.process(left: a, right: b, count: n)
             gr.process(left: a, right: b, count: n)
-            rv.process(left: a, right: b, count: n)
             sh.process(left: a, right: b, count: n)
             dp.process(left: a, right: b, count: n)
+            rv.process(left: a, right: b, count: n)
             eq.process(a, count: n, channel: 0); eq.process(b, count: n, channel: 1)
             for i in 0..<n { a[i] *= fixedDrive; b[i] *= fixedDrive }
             for ch in 0..<2 {

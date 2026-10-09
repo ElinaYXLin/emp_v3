@@ -408,12 +408,12 @@ struct ContentView: View {
                     recipesBox.frame(width: Self.columnWidth)
                 }
                 knobGroup("Temporal Haze") {
-                    knobRow(key: "reverb",  label: "Reverb",     sub: "Decay time",
-                            display: { String(format: "%.1fs", pow($0/100, 2) * 20) })
                     knobRow(key: "shimmer", label: "Shimmer",    sub: "Octave down",
                             display: { "\(Int($0))%" })
                     knobRow(key: "depth",   label: "Depth",      sub: "Undertones",
                             display: { "\(Int($0))%" })
+                    knobRow(key: "reverb",  label: "Reverb",     sub: "Decay time",
+                            display: { String(format: "%.1fs", pow($0/100, 2) * 20) })
                     knobRow(key: "grain",   label: "Grain Echo", sub: "Memory",
                             display: { String(format: "%.0fms", $0/100*200) })
                 }

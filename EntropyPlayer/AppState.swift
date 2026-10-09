@@ -217,7 +217,6 @@ final class AppState: ObservableObject {
         audio.setGroupDelayRandomness(effective: effective("gdrand"))
         audio.setGrainEcho(effective: effective("grain"))
         audio.setDepth(effective: effective("depth"))
-        audio.setDepthBlur(effective: effective("shimmer"))
         audio.setChoir(voices: effective("voices"), detune: effective("detune"), delay: effective("cdelay"), vibrato: effective("cvib"))
         audio.setSpectralBlur(effective: effective("blur"))
         audio.setShimmer(effective: effective("shimmer"))

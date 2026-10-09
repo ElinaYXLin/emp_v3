@@ -118,7 +118,7 @@ enum ReportMeasurer {
         ch.setDelay(s.choirDelay); ch.setVibrato(s.choirVibrato)
         let rv = ConvolutionReverb(); rv.setDecay(s.reverbDecaySec)
         let sh = Shimmer(); sh.setStrength(s.shimmer)
-        let dp = Depth(); dp.setAmount(s.depth); dp.setBlur(s.shimmer)
+        let dp = Depth(); dp.setAmount(s.depth)
         var l = input, r = input
         l.withUnsafeMutableBufferPointer { lb in
             r.withUnsafeMutableBufferPointer { rb in
@@ -129,9 +129,9 @@ enum ReportMeasurer {
                     gd.process(left: a, right: b, count: c)
                     bl.process(left: a, right: b, count: c)
                     gr.process(left: a, right: b, count: c)
-                    rv.process(left: a, right: b, count: c)
                     sh.process(left: a, right: b, count: c)
                     dp.process(left: a, right: b, count: c)
+                    rv.process(left: a, right: b, count: c)
                     i += c
                 }
             }
