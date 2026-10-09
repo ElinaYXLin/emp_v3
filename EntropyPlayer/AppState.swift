@@ -48,8 +48,6 @@ final class AppState: ObservableObject {
     @Published var isPlaying: Bool = false
     @Published var currentTime: Double = 0
     @Published var trackName: String = "no track loaded"
-    @Published var analyserSamples: [Float] = Array(repeating: 0, count: 256)
-    @Published var waveformPeaks: [Float] = []
 
     // System audio capture
     @Published var systemCaptureActive = false
@@ -87,9 +85,6 @@ final class AppState: ObservableObject {
 
     // MARK: Init
     init() {
-        audio.onSamples = { [weak self] s in
-            DispatchQueue.main.async { self?.analyserSamples = s }
-        }
         audio.onTrackEnded = { [weak self] in self?.advanceTrack() }
 
         timeTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -227,7 +222,6 @@ final class AppState: ObservableObject {
             if isPlaying { audio.play() }
             trackName = url.deletingPathExtension().lastPathComponent
             currentTime = 0
-            decodeWaveform(url: url)
         } catch {
             trackName = "Error loading track"
         }
@@ -274,32 +268,6 @@ final class AppState: ObservableObject {
     private func advanceTrack() {
         guard let url = playlist.next() else { return }
         loadAndPlay(url: url)
-    }
-
-    // MARK: - Waveform decoding (peaks for static display)
-    func decodeWaveform(url: URL) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self,
-                  let file = try? AVAudioFile(forReading: url) else { return }
-            let frameCount = AVAudioFrameCount(file.length)
-            guard let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: frameCount),
-                  (try? file.read(into: buf)) != nil,
-                  let ch = buf.floatChannelData else { return }
-
-            let numBars = 300
-            let data    = ch[0]
-            let block   = max(1, Int(buf.frameLength) / numBars)
-            var peaks   = [Float]()
-            for i in 0..<numBars {
-                var mx: Float = 0
-                for j in 0..<block { mx = max(mx, abs(data[i * block + j])) }
-                peaks.append(mx)
-            }
-            let maxP = peaks.max() ?? 1
-            let norm = maxP > 0 ? peaks.map { $0 / maxP } : peaks
-
-            DispatchQueue.main.async { self.waveformPeaks = norm }
-        }
     }
 
     // MARK: - Vibrato

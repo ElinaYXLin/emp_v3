@@ -12,7 +12,6 @@
 		AA2000000000000000000003 /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000003 /* AudioEngine.swift */; };
 		AA2000000000000000000004 /* PlaylistManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000004 /* PlaylistManager.swift */; };
 		AA2000000000000000000005 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000005 /* ContentView.swift */; };
-		AA2000000000000000000006 /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000006 /* WaveformView.swift */; };
 		AA2000000000000000000007 /* KnobView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000007 /* KnobView.swift */; };
 		AA2000000000000000000008 /* SliderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000008 /* SliderView.swift */; };
 		AA2000000000000000000011 /* CustomEQ.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000011 /* CustomEQ.swift */; };
@@ -39,7 +38,6 @@
 		AA1000000000000000000003 /* AudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngine.swift; sourceTree = "<group>"; };
 		AA1000000000000000000004 /* PlaylistManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistManager.swift; sourceTree = "<group>"; };
 		AA1000000000000000000005 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		AA1000000000000000000006 /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
 		AA1000000000000000000007 /* KnobView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnobView.swift; sourceTree = "<group>"; };
 		AA1000000000000000000008 /* SliderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SliderView.swift; sourceTree = "<group>"; };
 		AA1000000000000000000009 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -90,7 +88,6 @@
 				AA1000000000000000000003 /* AudioEngine.swift */,
 				AA1000000000000000000004 /* PlaylistManager.swift */,
 				AA1000000000000000000005 /* ContentView.swift */,
-				AA1000000000000000000006 /* WaveformView.swift */,
 				AA1000000000000000000007 /* KnobView.swift */,
 				AA1000000000000000000008 /* SliderView.swift */,
 				AA1000000000000000000011 /* CustomEQ.swift */,
@@ -196,7 +193,6 @@
 				AA2000000000000000000003 /* AudioEngine.swift in Sources */,
 				AA2000000000000000000004 /* PlaylistManager.swift in Sources */,
 				AA2000000000000000000005 /* ContentView.swift in Sources */,
-				AA2000000000000000000006 /* WaveformView.swift in Sources */,
 				AA2000000000000000000007 /* KnobView.swift in Sources */,
 				AA2000000000000000000008 /* SliderView.swift in Sources */,
 				AA2000000000000000000011 /* CustomEQ.swift in Sources */,

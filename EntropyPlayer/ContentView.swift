@@ -22,18 +22,30 @@ struct EntBtn: ButtonStyle {
 
 struct ContentView: View {
     @ObservedObject var app: AppState
+    @State private var page: Page = .effects
+
+    enum Page: String, CaseIterable { case effects = "Effects", emulation = "Emulation" }
+
+    static let pageWidth: CGFloat = 740
+    static let columnWidth: CGFloat = 220
+    static let sidePanelsWidth: CGFloat = 68 * 3          // pre-amp | macro, post-gain
+    /// Window content width at which both pages fit side by side.
+    static let bothPagesWidth: CGFloat = sidePanelsWidth + pageWidth * 2 + 14 * 4 + 28
 
     var body: some View {
         VStack(spacing: 0) {
             topBar
             // The knob area is taller than many laptop screens; let it scroll
             // so the top bar and transport are never pushed off-window.
-            ScrollView(.vertical) { mainGrid }
+            GeometryReader { geo in
+                ScrollView(.vertical) { mainGrid(width: geo.size.width) }
+            }
             transport
             ListeningMeterBar(model: app.meter)
         }
         .background(Color(hex: "#0f0d0b"))
         .preferredColorScheme(.dark)
+        .onAppear { WindowSizer.fitToScreen(idealWidth: Self.bothPagesWidth) }
     }
 
     // MARK: Top bar
@@ -277,17 +289,40 @@ struct ContentView: View {
         }
     }
 
-    // MARK: Main grid
+    // MARK: Main area
+    //
+    // Pre-Amp on the left, Macro + Post-Gain on the right — they drive both
+    // pages. Between them: the Effects and Emulation pages side by side when
+    // the window is wide enough, otherwise one at a time with tabs.
 
-    var mainGrid: some View {
-        HStack(alignment: .top, spacing: 14) {
+    func mainGrid(width: CGFloat) -> some View {
+        let both = width >= Self.bothPagesWidth
+        return HStack(alignment: .top, spacing: 14) {
             preampPanel
-            macroPanel
-            centerPanel
+            if both {
+                effectsPage
+                emulationPage
+            } else {
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 8) {
+                    pageTabs
+                    if page == .effects { effectsPage } else { emulationPage }
+                }
+            }
+            Spacer(minLength: 0)
             macroSliderPanel
             postGainPanel
         }
         .padding(14)
+    }
+
+    var pageTabs: some View {
+        HStack(spacing: 0) {
+            ForEach(Page.allCases, id: \.self) { p in
+                Button(p.rawValue) { page = p }
+                    .buttonStyle(EntBtn(active: page == p))
+            }
+        }
     }
 
     // MARK: Pre-amp
@@ -311,12 +346,24 @@ struct ContentView: View {
         .frame(width: 68)
     }
 
-    // MARK: Knobs panel
+    // MARK: Pages
 
-    var macroPanel: some View {
-        ZStack {
+    func page<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        ZStack(alignment: .topLeading) {
             panelBG
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(title.uppercased())
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .foregroundColor(Color(hex: "#d9d1bf").opacity(0.75))
+                content()
+            }
+            .padding(14)
+        }
+        .frame(width: Self.pageWidth)
+    }
+
+    var effectsPage: some View {
+        page("Effects") {
             HStack(alignment: .top, spacing: 22) {
                 knobGroup("Color") {
                     knobRow(key: "eq",      label: "Lo-Mid EQ", sub: "Gain",
@@ -328,38 +375,39 @@ struct ContentView: View {
                     knobRow(key: "rolloff", label: "High Roll", sub: "dB/oct >1k",
                             display: { String(format: "%.1fdB/oct", $0/100*6) })
                 }
-                knobGroup("Spectral Haze") {
-                    knobRow(key: "gd",     label: "Grp Delay", sub: "Periods",
-                            display: { String(format: "%.1fx", $0/100*20) })
-                    knobRow(key: "gdrand", label: "GD Random", sub: "Drift",
-                            display: { String(format: "±%.0f%%", $0/100*50) })
-                    knobRow(key: "blur",   label: "Spec Blur", sub: "Linger",
-                            display: { String(format: "%.1fs", 0.1 + $0/100*2.4) })
-                }
-                knobGroup("Temporal Haze") {
-                    knobRow(key: "reverb",  label: "Reverb",     sub: "Decay time",
-                            display: { String(format: "%.1fs", pow($0/100, 2) * 20) })
-                    knobRow(key: "shimmer", label: "Shimmer",    sub: "Octave down",
-                            display: { "\(Int($0))%" })
-                    knobRow(key: "grain",   label: "Grain Echo", sub: "Memory",
-                            display: { String(format: "%.0fms", $0/100*200) })
+                // Right two thirds: the haze columns, with Saturator Recipes
+                // filling the corner under them so the page is a rectangle.
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .top, spacing: 22) {
+                        knobGroup("Spectral Haze") {
+                            knobRow(key: "gd",     label: "Grp Delay", sub: "Periods",
+                                    display: { String(format: "%.1fx", $0/100*20) })
+                            knobRow(key: "gdrand", label: "GD Random", sub: "Drift",
+                                    display: { String(format: "±%.0f%%", $0/100*50) })
+                            knobRow(key: "blur",   label: "Spec Blur", sub: "Linger",
+                                    display: { String(format: "%.1fs", 0.1 + $0/100*2.4) })
+                        }
+                        knobGroup("Temporal Haze") {
+                            knobRow(key: "reverb",  label: "Reverb",     sub: "Decay time",
+                                    display: { String(format: "%.1fs", pow($0/100, 2) * 20) })
+                            knobRow(key: "shimmer", label: "Shimmer",    sub: "Octave down",
+                                    display: { "\(Int($0))%" })
+                            knobRow(key: "grain",   label: "Grain Echo", sub: "Memory",
+                                    display: { String(format: "%.0fms", $0/100*200) })
+                        }
+                    }
+                    recipesBox
                 }
             }
-            Divider().background(Color.black.opacity(0.5))
-            bottomZone
-            }
-            .padding(14)
         }
-        .frame(width: 740)
     }
 
-    // Bottom zone: saturator recipe on the left, tape stages on the right.
-    var bottomZone: some View {
-        HStack(alignment: .top, spacing: 22) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("SATURATOR RECIPES")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundColor(Color(hex:"#d9d1bf").opacity(0.35))
+    var recipesBox: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("SATURATOR RECIPES")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(Color(hex:"#d9d1bf").opacity(0.35))
+            HStack(alignment: .top, spacing: 14) {
                 Picker("", selection: Binding(get: { app.satRecipe }, set: { app.setRecipe($0) })) {
                     ForEach(SaturatorRecipe.all, id: \.name) { r in Text(r.name).tag(r.name) }
                 }
@@ -367,21 +415,43 @@ struct ContentView: View {
                 .pickerStyle(.menu)
                 .frame(width: 200)
                 Text(SaturatorRecipe.named(app.satRecipe).blurb)
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(Color(hex:"#8f8778"))
-                    .frame(width: 200, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            knobGroup("Tape") {
-                knobRow(key: "hyst", label: "Hysteresis", sub: "Tape memory",
-                        display: { "\(Int($0))%" })
-            }
-            knobGroup(" ") {
-                knobRow(key: "sag",  label: "Tape Sag",   sub: "Motor strain",
-                        display: { "\(Int($0))%" })
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(RoundedRectangle(cornerRadius: 2).fill(Color.black.opacity(0.18)))
+    }
+
+    var emulationPage: some View {
+        page("Emulation") {
+            HStack(alignment: .top, spacing: 22) {
+                knobGroup("Choir") { comingSoon("Choir ensemble: many slightly loose voices for a bigger, human sound.") }
+                knobGroup("Tape") {
+                    knobRow(key: "hyst", label: "Hysteresis", sub: "Tape memory",
+                            display: { "\(Int($0))%" })
+                    knobRow(key: "sag",  label: "Tape Sag",   sub: "Motor strain",
+                            display: { "\(Int($0))%" })
+                }
+                knobGroup("Tube Amp") { comingSoon("Loose, fuzzy tube-amp bass: speaker overhang, transformer fuzz, supply bloom.") }
             }
         }
+    }
+
+    func comingSoon(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("NOT BUILT YET")
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundColor(Color(hex: "#c65a2e"))
+            Text(text)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(Color(hex: "#8f8778"))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 2).stroke(Color(hex: "#8f8778").opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
     }
 
     func knobGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -391,7 +461,7 @@ struct ContentView: View {
                 .foregroundColor(Color(hex:"#d9d1bf").opacity(0.35))
             content()
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(width: Self.columnWidth, alignment: .topLeading)   // equal columns on both pages
     }
 
     @ViewBuilder
@@ -426,40 +496,6 @@ struct ContentView: View {
                     }
                 }
             }
-        }
-    }
-
-    // MARK: Center (waveform + track info)
-
-    var centerPanel: some View {
-        ZStack {
-            panelBG
-            VStack(spacing: 8) {
-                Text("SIGNAL")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundColor(Color(hex:"#d9d1bf").opacity(0.35))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                WaveformView(
-                    peaks: app.waveformPeaks,
-                    liveSamples: app.analyserSamples.map { abs($0) },
-                    isPlaying: app.isPlaying,
-                    macro: app.macro,
-                    color: app.waveColor)
-                .frame(height: 220)
-
-                HStack {
-                    Text(app.trackName)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Color(hex:"#8f8778"))
-                        .lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Text(timeString)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Color(hex:"#8f8778"))
-                }
-            }
-            .padding(14)
         }
     }
 
@@ -518,6 +554,21 @@ struct ContentView: View {
     var transport: some View {
         ZStack {
             Color(hex: "#29241e")
+            // Track info (moved here from the removed waveform panel).
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(app.trackName)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundColor(Color(hex:"#d9d1bf"))
+                        .lineLimit(1).truncationMode(.middle)
+                    Text(timeString)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Color(hex:"#8f8778"))
+                }
+                .frame(maxWidth: 320, alignment: .leading)
+                Spacer()
+            }
+            .padding(.horizontal, 20)
             if app.systemCaptureActive {
                 HStack(spacing: 12) {
                     Circle().fill(Color(hex: "#ff4444")).frame(width: 8, height: 8)
@@ -585,5 +636,26 @@ struct HoverHighlightModifier: ViewModifier {
         content
             .background(hovered ? Color(hex:"#ff7a3d").opacity(0.12) : Color.clear)
             .onHover { hovered = $0 }
+    }
+}
+
+// MARK: - Window sizing
+
+enum WindowSizer {
+    /// Widens the main window up to `idealWidth` (both pages side by side),
+    /// limited by the screen's usable width.
+    static func fitToScreen(idealWidth: CGFloat) {
+        DispatchQueue.main.async {
+            guard let window = NSApp.windows.first(where: { $0.isVisible }) ?? NSApp.windows.first,
+                  let screen = window.screen ?? NSScreen.main else { return }
+            let vf = screen.visibleFrame
+            var frame = window.frame
+            let target = min(vf.width, max(frame.width, idealWidth))
+            guard target > frame.width + 1 else { return }
+            frame.origin.x = vf.minX + (vf.width - target) / 2
+            frame.size.width = target
+            if frame.maxY > vf.maxY { frame.origin.y = vf.maxY - frame.height }
+            window.setFrame(frame, display: true, animate: false)
+        }
     }
 }
