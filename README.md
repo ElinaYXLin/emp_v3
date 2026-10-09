@@ -1,4 +1,6 @@
-# Entropy Music Player (EMP)
+# Entropy Music Player (EMP) — v3
+
+*The classic Entropy Music Player with better emulation!*
 
 A music player that makes music feel warm, hazy and nostalgic. One **Macro** slider drives a whole chain of effects (saturation, tape, smear, reverb, granular memory and more), so turning a single control moves a track from clean to a half-remembered dream.
 
