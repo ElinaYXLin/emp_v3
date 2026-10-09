@@ -157,3 +157,118 @@ final class TapeSag {
         }
     }
 }
+
+// MARK: - Wow & Flutter
+
+// Speed instability of a tape transport, as a modulated delay (pitch
+// deviation = −d(delay)/dt):
+//   • wow: slow drift from an uneven reel. A sine whose rate wanders
+//     0.4–1.6 Hz, plus a once-per-rotation bump (a sharper pulse at the
+//     same rate), up to ±0.5 % speed (≈ ±9 cents) at full strength.
+//   • flutter: capstan/roller ripple, 6–14 Hz wandering, up to ±0.12 %.
+// Both channels share the transport (same modulation), as on real tape.
+// A fixed 2 ms centre delay is always present, so latency stays constant and
+// strength 0 is a pure 2 ms delay. Realtime-safe.
+final class TapeWowFlutter {
+    private static let sr = 44100.0
+    static let latency = 88                                       // 2 ms centre
+    private static let size = 1024
+
+    private let lock = NSLock()
+    private var target = 0.0, strength = 0.0
+    private let buf = [UnsafeMutablePointer<Float>.allocate(capacity: TapeWowFlutter.size),
+                       UnsafeMutablePointer<Float>.allocate(capacity: TapeWowFlutter.size)]
+    private var w = 0
+    private var wowPh = 0.0, flPh = 0.0
+    private var wowRate = 0.9, wowRateT = 0.9, flRate = 9.0, flRateT = 9.0
+    private var retarget = 0
+    private var rng: UInt64 = 0x77F1_7A7E_0BAD_CAFE
+
+    init() { buf.forEach { $0.initialize(repeating: 0, count: Self.size) } }
+    deinit { buf.forEach { $0.deallocate() } }
+
+    func setStrength(_ s: Double) { lock.lock(); target = max(0, min(1, s)); lock.unlock() }
+
+    private func rand() -> Double {
+        rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17
+        return Double(rng >> 11) / Double(1 << 53)
+    }
+
+    func process(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>?, count: Int) {
+        lock.lock(); let t = target; lock.unlock()
+        let sr = Self.sr, mask = Self.size - 1
+        strength += (t - strength) * (1 - exp(-Double(count) / (0.05 * sr)))
+        // Rates wander: a new target every ~3 s, glided.
+        retarget -= count
+        if retarget <= 0 {
+            retarget = Int(sr * (2 + 2 * rand()))
+            wowRateT = 0.4 + 1.2 * rand(); flRateT = 6 + 8 * rand()
+        }
+        let rg = 1 - exp(-Double(count) / (1.5 * sr))
+        wowRate += (wowRateT - wowRate) * rg; flRate += (flRateT - flRate) * rg
+        // Delay amplitude for a given peak speed deviation: A = dev / (2π f).
+        let wowA = 0.005 * strength / (2 * .pi * wowRate) * sr
+        let flA = 0.0012 * strength / (2 * .pi * flRate) * sr
+        let wInc = wowRate / sr, fInc = flRate / sr
+        let centre = Double(Self.latency)
+        let L = buf[0], R = buf[1]
+        for i in 0..<count {
+            L[w] = left[i]; R[w] = right?[i] ?? left[i]
+            wowPh += wInc; if wowPh >= 1 { wowPh -= 1 }
+            flPh += fInc; if flPh >= 1 { flPh -= 1 }
+            let a = 2 * Double.pi * wowPh
+            // Sine + once-per-rotation bump (sin³ sharpens the peak).
+            let s = sin(a), bump = s * s * s
+            let d = centre + wowA * (0.75 * s + 0.25 * bump) + flA * sin(2 * .pi * flPh)
+            let pos = Double(w) - d
+            let fl = pos.rounded(.down), fr = Float(pos - fl)
+            let i0 = Int(fl) & mask, i1 = (i0 + 1) & mask
+            left[i] = L[i0] + (L[i1] - L[i0]) * fr
+            right?[i] = R[i0] + (R[i1] - R[i0]) * fr
+            w = (w + 1) & mask
+        }
+    }
+}
+
+// MARK: - Self-Erasure
+
+// Tape saturates high frequencies first: during loud, bright passages the
+// recording bias partly erases the treble it is laying down, so the top end
+// squashes while the mids stay put. Model: split at ~3.5 kHz (complementary
+// one-pole pair, so the bands sum back exactly), follow the treble band's
+// envelope (1 ms attack / 120 ms release), and compress and softly saturate
+// only that band. Strength sets how hard: up to ~−12 dB of treble on loud
+// bright material, nothing on quiet or dark material. Strength 0 is exact.
+final class TapeSelfErasure {
+    private static let sr = 44100.0
+    private let lock = NSLock()
+    private var target = 0.0, strength = 0.0
+    private var lp = [0.0, 0.0], env = [0.0, 0.0]
+    private let split = 1 - exp(-2 * Double.pi * 3500 / 44100)
+    private let atk = 1 - exp(-1 / (0.001 * 44100)), rel = 1 - exp(-1 / (0.120 * 44100))
+
+    func setStrength(_ s: Double) { lock.lock(); target = max(0, min(1, s)); lock.unlock() }
+
+    func process(_ buf: UnsafeMutablePointer<Float>, count: Int, channel ch: Int) {
+        lock.lock(); let t = target; lock.unlock()
+        if ch == 0 { strength += (t - strength) * (1 - exp(-Double(count) / (0.05 * Self.sr))) }
+        var l = lp[ch], e = env[ch]
+        if t == 0 && strength < 1e-5 {
+            for i in 0..<count { l += split * (Double(buf[i]) - l) }   // keep the split warm
+            lp[ch] = l; env[ch] = 0; return
+        }
+        let k = 30 * strength * strength + 6 * strength         // compression depth
+        let drive = 1 + 3 * strength
+        for i in 0..<count {
+            let x = Double(buf[i])
+            l += split * (x - l)
+            let h = x - l
+            let a = abs(h)
+            e += (a > e ? atk : rel) * (a - e)
+            let g = 1 / (1 + k * e)
+            let hc = tanh(h * g * drive) / drive                    // soft ceiling on the treble
+            buf[i] = Float(l + hc)
+        }
+        lp[ch] = l; env[ch] = e
+    }
+}

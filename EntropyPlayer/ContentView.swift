@@ -450,6 +450,10 @@ struct ContentView: View {
                             display: { "\(Int($0))%" })
                     knobRow(key: "sag",  label: "Tape Sag",   sub: "Motor strain",
                             display: { "\(Int($0))%" })
+                    knobRow(key: "wow",   label: "Wow/Flutter",  sub: "Transport",
+                            display: { "\(Int($0))%" })
+                    knobRow(key: "erase", label: "Self-Erasure", sub: "Treble squash",
+                            display: { "\(Int($0))%" })
                 }
                 knobGroup("Tube Amp") {
                     knobRow(key: "fuzz",  label: "Fuzz",  sub: "Transformer",
@@ -457,6 +461,8 @@ struct ContentView: View {
                     knobRow(key: "bloom", label: "Bloom", sub: "Bass sag",
                             display: { "\(Int($0))%" })
                     knobRow(key: "fur",   label: "Fur",   sub: "Bias crackle",
+                            display: { "\(Int($0))%" })
+                    knobRow(key: "wobble", label: "Wobble", sub: "Bias drift",
                             display: { "\(Int($0))%" })
                 }
             }
@@ -544,8 +550,8 @@ struct ContentView: View {
             panelBG
             VStack {
                 let postGainPct = Binding(
-                    get: { (app.postGainDb + 24) / 48 * 100 },   // -24→24 dB maps 0→100
-                    set: { app.postGainDb = $0 / 100 * 48 - 24
+                    get: { (app.postGainDb + 24) / 72 * 100 },   // -24→48 dB maps 0→100
+                    set: { app.postGainDb = $0 / 100 * 72 - 24
                            app.audio.setPostGain(db: Float(app.postGainDb)) })
                 VerticalSliderView(
                     title: "POST-GAIN",

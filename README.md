@@ -42,7 +42,7 @@ Every effect knob is a **sensitivity**: how strongly the **Macro** slider drives
 
 Other controls:
 
-- **Pre-Amp** and **Post-Gain** sliders: input trim and clean output volume.
+- **Pre-Amp** and **Post-Gain** sliders: input trim and clean output volume (Post-Gain goes up to +48 dB; the output ceiling still catches peaks).
 - **Limiter / Compressor**: the final dynamics stage, with an always-on safety ceiling after it.
 - **Presets**: 40 global presets grouped by vibe (Nostalgic, Calming, Inspiring, Dreamy, Playful), plus **INIT**, the defaults.
 - **Save / Load Settings**: store your knobs, ranges and recipe as JSON.
@@ -50,7 +50,7 @@ Other controls:
 
 ### Effects
 
-Signal flow: **Spectral Haze → Temporal Haze (Choir sits just before the reverb) → Color → Tape → Tube Amp → dynamics → output**. Every effect is level-matched, so turning one up doesn't simply make things louder or push the limiter. The Lo-Mid EQ and High Roll-off are the exceptions, since changing tone is their job.
+Signal flow: **Choir → Spectral Haze → Temporal Haze → Color → Tape → Tube Amp → dynamics → output**. Every effect is level-matched, so turning one up doesn't simply make things louder or push the limiter. The Lo-Mid EQ and High Roll-off are the exceptions, since changing tone is their job.
 
 **Color**
 | Knob | What it does |
@@ -80,6 +80,8 @@ Signal flow: **Spectral Haze → Temporal Haze (Choir sits just before the rever
 | Saturator Recipes | 20 characters (Sweeten, Thicken, Vintagize, Glow, Velvet… and nostalgic ones like Grandma's Kitchen or Faded Polaroid) that reshape the saturators with emphasis EQ, tube bias and exact harmonic recipes |
 | Hysteresis | Tape magnetic "memory": rounded, slightly compressed response with a head bump |
 | Tape Sag | Loud passages make the tape dip in level, dull and briefly droop in pitch |
+| Wow/Flutter | Transport speed wobble: slow wow (0.4–1.6 Hz, with a once-per-rotation bump) plus fast flutter (6–14 Hz), up to about ±9 cents |
+| Self-Erasure | Loud, bright passages squash the treble (above ~3.5 kHz) while the mids stay put, as tape saturates highs first |
 
 **Choir** (Emulation page)
 | Knob | What it does |
@@ -94,6 +96,7 @@ Signal flow: **Spectral Haze → Temporal Haze (Choir sits just before the rever
 |---|---|
 | Fuzz | Transformer saturation on magnetic flux, so low notes fuzz far more than high ones (40 Hz much more than 200 Hz); the fuzz alone is low-passed like a speaker cabinet (4.5 → 3 kHz) to stay round and woolly |
 | Bloom | Each bass hit briefly dips the level, then it blooms back over 100–300 ms (stronger and slower as the knob rises); the mids take about a third of the dip, so the amp breathes with the kick |
+| Wobble | The even saturator's bias drifts to a random point over 20–100 s; as the bias rises, a low-pass closes (down to ~2.5 kHz). Needs Even Sat turned up |
 | Fur | After loud bass the fuzz bias drifts, so decays crackle softly; higher is louder and more frequent |
 
 ### Listener Report

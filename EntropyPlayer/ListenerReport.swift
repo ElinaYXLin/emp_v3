@@ -75,13 +75,14 @@ extension AppState {
         let recipe     = SaturatorRecipe.named(satRecipe)
         let hyst       = eff("hyst")
         let sag        = eff("sag")
+        let wow = eff("wow"), erase = eff("erase"), wobble = eff("wobble")
         let fuzz = eff("fuzz"), bloom = eff("bloom"), fur = eff("fur")
         let cVoices = eff("voices"), cDetune = eff("detune"), cDelay = eff("cdelay"), cVib = eff("cvib")
         let shimRT     = shimmer > 0 ? 0.095 * 3 / -log10(0.40 + 0.50 * shimmer) : 0   // loop trip / dB per trip → RT60
 
         var cs = ChainSettings()
         cs.preampDb = preampDb; cs.eqDb = eqDb; cs.evenDb = evenDb; cs.oddDb = oddDb
-        cs.recipe = recipe; cs.hysteresis = hyst; cs.sag = sag; cs.fuzz = fuzz; cs.bloom = bloom; cs.fur = fur; cs.choirVoices = cVoices; cs.choirDetune = cDetune; cs.choirDelay = cDelay; cs.choirVibrato = cVib; cs.rolloff = rollSlope
+        cs.recipe = recipe; cs.hysteresis = hyst; cs.sag = sag; cs.wow = wow; cs.erase = erase; cs.wobble = wobble; cs.fuzz = fuzz; cs.bloom = bloom; cs.fur = fur; cs.choirVoices = cVoices; cs.choirDetune = cDetune; cs.choirDelay = cDelay; cs.choirVibrato = cVib; cs.rolloff = rollSlope
         cs.compressor = dynamicsMode == .compressor
         cs.gdScale = gdScale; cs.blur = blur; cs.grain = grain
         cs.reverbDecaySec = decaySec; cs.shimmer = shimmer
@@ -110,6 +111,15 @@ extension AppState {
                       : "off"),
                 .init(label: "Choir",          value: cVoices > 0.001
                       ? String(format: "%.1f singers, detune ±%.0f ct, delay to %.0f ms, vibrato ±%.0f ct @ 3–20 Hz", cVoices * 16, 35 * cDetune, 60 * cDelay, 40 * cVib)
+                      : "off"),
+                .init(label: "Wow & flutter",  value: wow > 0.001
+                      ? String(format: "%.0f%%: wow ±%.2f %% @ 0.4–1.6 Hz, flutter ±%.2f %% @ 6–14 Hz", wow * 100, 0.5 * wow, 0.12 * wow)
+                      : "off"),
+                .init(label: "Self-erasure",   value: erase > 0.001
+                      ? String(format: "%.0f%%: treble above 3.5 kHz compressed and soft-clipped on loud bright passages", erase * 100)
+                      : "off"),
+                .init(label: "Tube wobble",    value: wobble > 0.001
+                      ? String(format: "%.0f%%: even-sat bias drifts ±%.2f over 20–100 s; rising bias closes a low-pass to %.1f kHz", wobble * 100, wobble, 20 * pow(0.125, wobble))
                       : "off"),
                 .init(label: "Tube fuzz",      value: fuzz > 0.001
                       ? String(format: "%.0f%%: transformer flux drive %.1f×, ~5× heavier @ 40 Hz than 200 Hz, cab LP %.1f kHz", fuzz * 100, 14 * pow(fuzz, 1.2), (4500 - 1500 * fuzz) / 1000)

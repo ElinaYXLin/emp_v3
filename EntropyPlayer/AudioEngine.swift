@@ -93,6 +93,8 @@ final class AudioEngine {
     private let tapeHyst      = TapeHysteresis()
     private let tapeSag       = TapeSag()
     private let tubeAmp       = TubeAmp()
+    private let tapeWow       = TapeWowFlutter()
+    private let tapeErase     = TapeSelfErasure()
     private var evenDriveDb: Float = 0, oddDriveDb: Float = 0
     private var recipe = SaturatorRecipe.classic
 
@@ -357,11 +359,12 @@ final class AudioEngine {
 
     /// The full DSP chain, in place, on the render thread.
     private func renderChain(left l: UnsafeMutablePointer<Float>, right r: UnsafeMutablePointer<Float>, count n: Int) {
-        // Spectral haze, then temporal haze.
+        // Emulation › Choir first, then the Effects page: spectral haze,
+        // temporal haze, color. The rest of Emulation (tape, tube amp) follows.
+        choir.process(left: l, right: r, count: n)
         groupDelay.process(left: l, right: r, count: n)
         spectralBlur.process(left: l, right: r, count: n)
         grainEcho.process(left: l, right: r, count: n)
-        choir.process(left: l, right: r, count: n)
         reverbFilter.process(left: l, right: r, count: n)
         shimmer.process(left: l, right: r, count: n)
 
@@ -380,15 +383,22 @@ final class AudioEngine {
             satFilter.process(buf, count: n, channel: ch)
             oddSatFilter.process(buf, count: n, channel: ch)
             recipeStage.post(buf, count: n, channel: ch)
+        }
+        highRolloff.process(l, count: n, channel: 0)
+        highRolloff.process(r, count: n, channel: 1)
+
+        // Emulation › Tape, then Tube Amp — still inside the +7 dB drive.
+        for ch in 0..<2 {
+            let buf = ch == 0 ? l : r
             tapeHyst.process(buf, count: n, channel: ch)
+            tapeErase.process(buf, count: n, channel: ch)
         }
         tapeSag.process(left: l, right: r, count: n)
+        tapeWow.process(left: l, right: r, count: n)
         tubeAmp.process(left: l, right: r, count: n)
         var gInv = 1 / preLimiterGainLinear
         vDSP_vsmul(l, 1, &gInv, l, 1, vDSP_Length(n))
         vDSP_vsmul(r, 1, &gInv, r, 1, vDSP_Length(n))
-        highRolloff.process(l, count: n, channel: 0)
-        highRolloff.process(r, count: n, channel: 1)
 
         compressor.process(left: l, right: r, count: n)
 
@@ -568,6 +578,12 @@ final class AudioEngine {
     func setTapeSag(effective eff: Float) {
         tapeSag.setStrength(Double(eff))
     }
+
+    /// Tape wow & flutter / self-erasure: effective 0–1 (see Tape.swift).
+    func setTapeWow(effective eff: Float) { tapeWow.setStrength(Double(eff)) }
+    func setTapeErasure(effective eff: Float) { tapeErase.setStrength(Double(eff)) }
+    /// Tube amp wobble: drifts the even saturator's bias (CustomSaturator.swift).
+    func setWobble(effective eff: Float) { satFilter.setWobble(Double(eff)) }
 
     /// Tube amp: effective 0–1 each for Fuzz, Bloom and Fur (see TubeAmp.swift).
     func setTubeAmp(fuzz: Float, bloom: Float, fur: Float) {

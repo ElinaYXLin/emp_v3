@@ -28,7 +28,8 @@ struct ChainSettings {
     var evenDb = 0.0, oddDb = 0.0
     var recipe = SaturatorRecipe.classic
     var hysteresis = 0.0, sag = 0.0
-    var fuzz = 0.0, bloom = 0.0, fur = 0.0
+    var fuzz = 0.0, bloom = 0.0, fur = 0.0, wobble = 0.0
+    var wow = 0.0, erase = 0.0
     var choirVoices = 0.0, choirDetune = 0.0, choirDelay = 0.0, choirVibrato = 0.0
     var rolloff = 0.0
     var compressor = false
@@ -60,10 +61,11 @@ enum ReportMeasurer {
         let ss = SubsonicFilter()
         let rs = RecipeStage(); rs.configure(s.recipe, amount: (s.evenDb + s.oddDb) / 16)
         let ev = WebAudioSaturator(voicing: .even)
-        ev.setDrive(driveDb: min(24, s.evenDb * s.recipe.evenMul)); ev.setBias(s.recipe.bias)
+        ev.setDrive(driveDb: min(24, s.evenDb * s.recipe.evenMul)); ev.setBias(s.recipe.bias); ev.setWobble(s.wobble)
         let od = WebAudioSaturator(voicing: .odd); od.setDrive(driveDb: min(24, s.oddDb * s.recipe.oddMul))
         let th = TapeHysteresis(); th.setStrength(s.hysteresis)
         let sg = TapeSag(); sg.setStrength(s.sag)
+        let er = TapeSelfErasure(); er.setStrength(s.erase)
         let ta = TubeAmp(); ta.setFuzz(s.fuzz); ta.setBloom(s.bloom); ta.setFur(s.fur)
         let ro = HighRolloff(); ro.setSlope(dbPerOctave: s.rolloff)
         let dyn = WebAudioCompressor(); dyn.setSampleRate(sr)
@@ -86,11 +88,12 @@ enum ReportMeasurer {
                 ev.process(q, count: c, channel: 0)
                 od.process(q, count: c, channel: 0)
                 rs.post(q, count: c, channel: 0)
+                ro.process(q, count: c, channel: 0)
                 th.process(q, count: c, channel: 0)
+                er.process(q, count: c, channel: 0)
                 sg.process(left: q, right: nil, count: c)
                 ta.process(left: q, right: nil, count: c)
                 for j in 0..<c { q[j] /= fixedDrive }     // fixed +7 dB is undone after the saturation stage
-                ro.process(q, count: c, channel: 0)
                 dyn.process(left: q, right: nil, count: c)
                 i += c
             }
@@ -115,10 +118,10 @@ enum ReportMeasurer {
                 var i = 0
                 while i < n {
                     let c = min(470, n - i), a = lb.baseAddress! + i, b = rb.baseAddress! + i
+                    ch.process(left: a, right: b, count: c)
                     gd.process(left: a, right: b, count: c)
                     bl.process(left: a, right: b, count: c)
                     gr.process(left: a, right: b, count: c)
-                    ch.process(left: a, right: b, count: c)
                     rv.process(left: a, right: b, count: c)
                     sh.process(left: a, right: b, count: c)
                     i += c

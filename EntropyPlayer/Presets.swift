@@ -35,7 +35,8 @@ struct GlobalPreset {
          "gd": gd, "gdrand": gdr, "blur": blur,
          "reverb": rev, "shimmer": shim, "grain": grain,
          "hyst": hyst, "sag": sag, "fuzz": 0, "bloom": 0, "fur": 0,
-         "voices": 0, "detune": 0, "cdelay": 0, "cvib": 0]
+         "voices": 0, "detune": 0, "cdelay": 0, "cvib": 0,
+         "wobble": 0, "wow": 0, "erase": 0]
     }
 
     static let initName = "INIT"

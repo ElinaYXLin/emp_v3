@@ -21,8 +21,8 @@ import UniformTypeIdentifiers
 final class OfflineChain {
     static let sampleRate = 44100.0
     /// Fixed latency of the chain: group delay (512 + 64), spectral blur
-    /// (2048), tape sag (88).
-    static let latency = 512 + 64 + 2048 + 88
+    /// (2048), tape sag (88), wow & flutter centre delay (88).
+    static let latency = 512 + 64 + 2048 + 88 + TapeWowFlutter.latency
 
     private let s: ChainSettings
     private let gd = GroupDelay(), bl = SpectralBlur(), gr = GrainEcho(), ch = Choir()
@@ -30,6 +30,7 @@ final class OfflineChain {
     private let eq = PeakingBiquad(), ss = SubsonicFilter(), rs = RecipeStage()
     private let ev = WebAudioSaturator(voicing: .even), od = WebAudioSaturator(voicing: .odd)
     private let th = TapeHysteresis(), sg = TapeSag(), ta = TubeAmp(), ro = HighRolloff()
+    private let wf = TapeWowFlutter(), er = TapeSelfErasure()
     private let dyn = WebAudioCompressor(), ceiling = WebAudioCompressor()
     private let inGain: Float, fixedDrive: Float, postGain: Float
 
@@ -41,9 +42,10 @@ final class OfflineChain {
         rv.setDecay(s.reverbDecaySec); sh.setStrength(s.shimmer)
         eq.setParameters(frequency: 150, q: 0.1, gainDb: s.eqDb)
         rs.configure(s.recipe, amount: (s.evenDb + s.oddDb) / 16)
-        ev.setDrive(driveDb: min(24, s.evenDb * s.recipe.evenMul)); ev.setBias(s.recipe.bias)
+        ev.setDrive(driveDb: min(24, s.evenDb * s.recipe.evenMul)); ev.setBias(s.recipe.bias); ev.setWobble(s.wobble)
         od.setDrive(driveDb: min(24, s.oddDb * s.recipe.oddMul))
         th.setStrength(s.hysteresis); sg.setStrength(s.sag); ro.setSlope(dbPerOctave: s.rolloff)
+        wf.setStrength(s.wow); er.setStrength(s.erase)
         ta.setFuzz(s.fuzz); ta.setBloom(s.bloom); ta.setFur(s.fur)
         dyn.setSampleRate(Self.sampleRate)
         if s.compressor {
@@ -68,10 +70,10 @@ final class OfflineChain {
         while done < total {
             let n = min(470, total - done), a = l + done, b = r + done
             for i in 0..<n { a[i] *= inGain; b[i] *= inGain }
+            ch.process(left: a, right: b, count: n)
             gd.process(left: a, right: b, count: n)
             bl.process(left: a, right: b, count: n)
             gr.process(left: a, right: b, count: n)
-            ch.process(left: a, right: b, count: n)
             rv.process(left: a, right: b, count: n)
             sh.process(left: a, right: b, count: n)
             eq.process(a, count: n, channel: 0); eq.process(b, count: n, channel: 1)
@@ -83,12 +85,17 @@ final class OfflineChain {
                 ev.process(q, count: n, channel: ch)
                 od.process(q, count: n, channel: ch)
                 rs.post(q, count: n, channel: ch)
+            }
+            ro.process(a, count: n, channel: 0); ro.process(b, count: n, channel: 1)
+            for ch in 0..<2 {
+                let q = ch == 0 ? a : b
                 th.process(q, count: n, channel: ch)
+                er.process(q, count: n, channel: ch)
             }
             sg.process(left: a, right: b, count: n)
+            wf.process(left: a, right: b, count: n)
             ta.process(left: a, right: b, count: n)
             for i in 0..<n { a[i] /= fixedDrive; b[i] /= fixedDrive }
-            ro.process(a, count: n, channel: 0); ro.process(b, count: n, channel: 1)
             dyn.process(left: a, right: b, count: n)
             for i in 0..<n { a[i] *= postGain; b[i] *= postGain }
             ceiling.process(left: a, right: b, count: n)
@@ -201,6 +208,7 @@ extension AppState {
         cs.oddDb = eff("oddsat") * 16
         cs.recipe = SaturatorRecipe.named(satRecipe)
         cs.hysteresis = eff("hyst"); cs.sag = eff("sag")
+        cs.wow = eff("wow"); cs.erase = eff("erase"); cs.wobble = eff("wobble")
         cs.fuzz = eff("fuzz"); cs.bloom = eff("bloom"); cs.fur = eff("fur")
         cs.rolloff = eff("rolloff") * 6
         cs.compressor = dynamicsMode == .compressor

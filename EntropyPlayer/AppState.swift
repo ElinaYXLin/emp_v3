@@ -12,7 +12,7 @@ struct AppSettings: Codable {
     var macro:        Double = 0
     var sensitivity:  [String: Double] = GlobalPreset.initPreset.sensitivity
     var ranges:       [String: RangeValue] = [
-        "reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init()
+        "reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init()
     ]
     var recipe:       String? = nil      // optional: older files predate recipes
     var order:        String = "alpha"
@@ -20,7 +20,7 @@ struct AppSettings: Codable {
 
     /// Knobs added after older settings files/presets were written start at 0.
     static func defaultSensitivity(_ key: String) -> Double {
-        ["fuzz", "bloom", "fur", "voices", "detune", "cdelay", "cvib"].contains(key) ? 0 : 50
+        ["fuzz", "bloom", "fur", "voices", "detune", "cdelay", "cvib", "wobble", "wow", "erase"].contains(key) ? 0 : 50
     }
 }
 
@@ -32,9 +32,9 @@ final class AppState: ObservableObject {
     // MARK: Published UI state
     @Published var macro: Double = 0              // 0–100
     @Published var preampDb: Double = 0           // -12…0
-    @Published var postGainDb: Double = 0         // -24…24, final output volume trim/boost
+    @Published var postGainDb: Double = 0         // -24…48, final output volume trim/boost
     @Published var sensitivity: [String: Double] = GlobalPreset.initPreset.sensitivity
-    @Published var ranges: [String: RangeValue]  = ["reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init()]
+    @Published var ranges: [String: RangeValue]  = ["reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init()]
     @Published var waveColor: Color = Color(hex: "#35d6d0")
     @Published var satRecipe: String = SaturatorRecipe.classic.name
     /// Audio quality mode (persisted). Low = cheaper versions of the heaviest effects.
@@ -208,6 +208,9 @@ final class AppState: ObservableObject {
         audio.setShimmer(effective: effective("shimmer"))
         audio.setTapeHysteresis(effective: effective("hyst"))
         audio.setTapeSag(effective: effective("sag"))
+        audio.setTapeWow(effective: effective("wow"))
+        audio.setTapeErasure(effective: effective("erase"))
+        audio.setWobble(effective: effective("wobble"))
         audio.setTubeAmp(fuzz: effective("fuzz"), bloom: effective("bloom"), fur: effective("fur"))
         audio.setSaturatorRecipe(SaturatorRecipe.named(satRecipe))
         audio.setEQ(gainDb: effective("eq") * 12)

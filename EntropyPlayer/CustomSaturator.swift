@@ -81,6 +81,38 @@ final class WebAudioSaturator {
     /// place of the exact double-precision tanh — the saturators were the
     /// most expensive stage. Max error ≈ 2 % near the knee; inaudible as
     /// a level change, slightly different harmonic balance at high drive.
+    // Wobble (even voicing): the bias drifts to a random destination in
+    // ±wobble over a random 20–100 s, then picks the next. A rising bias also
+    // closes a 2-pole low-pass on the saturator's output (20 kHz → ~2.5 kHz
+    // at +1 bias shift); falling bias leaves it open. Wobble 0 is exact.
+    private var wobble = 0.0
+    private var wobFrom = 0.0, wobTo = 0.0, wobPos = 0.0, wobLen = 1.0, wobShift = 0.0
+    private var wobRng: UInt64 = 0xB1A5_0FF5_E7D1_F7ED
+    private var wlp = [[0.0, 0.0], [0.0, 0.0]]
+    private var wobLPCoef = 1.0
+    func setWobble(_ w: Double) { lock.lock(); wobble = max(0, min(1, w)); lock.unlock() }
+    /// Current wobble bias shift (for display/report).
+    var wobbleShift: Double { wobShift }
+
+    private func wobRand() -> Double {
+        wobRng ^= wobRng << 13; wobRng ^= wobRng >> 7; wobRng ^= wobRng << 17
+        return Double(wobRng >> 11) / Double(1 << 53)
+    }
+
+    /// Advances the wobble LFO by one block (called on channel 0).
+    private func advanceWobble(_ count: Int, _ amount: Double) {
+        wobPos += Double(count)
+        if wobPos >= wobLen {
+            wobPos = 0; wobFrom = wobTo
+            wobTo = wobRand() * 2 - 1
+            wobLen = (20 + 80 * wobRand()) * Self.sampleRate
+        }
+        let e = 0.5 - 0.5 * cos(Double.pi * wobPos / wobLen)
+        wobShift = amount * (wobFrom + (wobTo - wobFrom) * e)
+        let fc = 20000 * pow(0.125, max(0, wobShift))
+        wobLPCoef = 1 - exp(-2 * Double.pi * fc / Self.sampleRate)
+    }
+
     private var lowQuality = false
     func setLowQuality(_ on: Bool) { lock.lock(); lowQuality = on; lock.unlock() }
 
@@ -112,8 +144,13 @@ final class WebAudioSaturator {
 
     func process(_ buffer: UnsafeMutablePointer<Float>, count: Int, channel: Int) {
         lock.lock()
-        let drive = driveLin, post = postGain, biasAmt = biasAmount, lq = lowQuality
+        let drive = driveLin, post = postGain, lq = lowQuality, wob = wobble
+        var biasAmt = biasAmount
         lock.unlock()
+        if voicing == .even {
+            if channel == 0 { advanceWobble(count, wob) }
+            biasAmt = max(0, biasAmt + wobShift)
+        }
 
         // Hot loop: plain local scalars only (no captured closures or nested
         // arrays — those cost far more than the tanh itself).
@@ -174,6 +211,18 @@ final class WebAudioSaturator {
                 g = max(1, min(maxMakeup, ((pi + 1e-12) / (po + 1e-12)).squareRoot()))
             }
             buffer[i] = Float(y * g)
+        }
+        if wobShift > 0.002 || wlp[ch][1] != 0 {
+            // Wobble low-pass (also runs while it settles back open).
+            var p0 = wlp[ch][0], p1 = wlp[ch][1]
+            let c = wobLPCoef
+            for i in 0..<count {
+                let x = Double(buffer[i])
+                p0 += c * (x - p0); p1 += c * (p0 - p1)
+                buffer[i] = Float(p1)
+            }
+            if wobShift <= 0.002 && abs(p1 - Double(buffer[count - 1])) < 1e-9 { p0 = 0; p1 = 0 }
+            wlp[ch] = [p0, p1]
         }
         s0 = [a0, a1, a2, a3]; s1 = [b0, b1, b2, b3]
         env[ch] = e; hpState[ch] = [s0, s1]
