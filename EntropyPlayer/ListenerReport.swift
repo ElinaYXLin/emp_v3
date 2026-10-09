@@ -75,6 +75,7 @@ extension AppState {
         let recipe     = SaturatorRecipe.named(satRecipe)
         let hyst       = eff("hyst")
         let sag        = eff("sag")
+        let depthAmt = eff("depth")
         let wow = eff("wow"), erase = eff("erase"), wobble = eff("wobble")
         let fuzz = eff("fuzz"), bloom = eff("bloom"), fur = eff("fur")
         let cVoices = eff("voices"), cDetune = eff("detune"), cDelay = eff("cdelay"), cVib = eff("cvib")
@@ -82,7 +83,7 @@ extension AppState {
 
         var cs = ChainSettings()
         cs.preampDb = preampDb; cs.eqDb = eqDb; cs.evenDb = evenDb; cs.oddDb = oddDb
-        cs.recipe = recipe; cs.hysteresis = hyst; cs.sag = sag; cs.wow = wow; cs.erase = erase; cs.wobble = wobble; cs.fuzz = fuzz; cs.bloom = bloom; cs.fur = fur; cs.choirVoices = cVoices; cs.choirDetune = cDetune; cs.choirDelay = cDelay; cs.choirVibrato = cVib; cs.rolloff = rollSlope
+        cs.recipe = recipe; cs.hysteresis = hyst; cs.sag = sag; cs.depth = depthAmt; cs.bandEQ = bandEQ; cs.wow = wow; cs.erase = erase; cs.wobble = wobble; cs.fuzz = fuzz; cs.bloom = bloom; cs.fur = fur; cs.choirVoices = cVoices; cs.choirDetune = cDetune; cs.choirDelay = cDelay; cs.choirVibrato = cVib; cs.rolloff = rollSlope
         cs.compressor = dynamicsMode == .compressor
         cs.gdScale = gdScale; cs.blur = blur; cs.grain = grain
         cs.reverbDecaySec = decaySec; cs.shimmer = shimmer
@@ -125,8 +126,11 @@ extension AppState {
                       : String(format: "%.2f s RT", decaySec)),
                 .init(label: "Reverb color",  value: "wet 0.8 / dry 0.6, tail darkens 7k→1.2k Hz"),
                 .init(label: "Shimmer",       value: shimmer > 0.001
-                      ? String(format: "−1 octave glow, %.1f dB re dry, ~%.1f s sustain", shimMixDb, shimRT)
+                      ? String(format: "−1 octave glow, %.1f dB re dry, ~%.1f s sustain, lags %.0f–%.0f ms (drifting)", shimMixDb, shimRT, 120 * shimmer, 200 * shimmer)
                       : "off"),
+                .init(label: "Depth",         value: depthAmt > 0.001
+                      ? String(format: "%.0f%%: undertones of 0.7–5 kHz down to f/%d, %.2f s swell / %.1f s linger, LP 1.1 kHz", depthAmt * 100, 1 + Int((depthAmt * 4).rounded(.up)), 0.05 + 0.25 * shimmer, 0.3 + 1.7 * shimmer)
+                      : "off (original note only)"),
                 .init(label: "Grain echo",    value: grain > 0.001
                       ? String(format: "%.0f ms memory, %.0f ms grains ±%.0f¢, %.1f dB re dry", grainMemMs, grainLenMs, grainCents, grainMixDb)
                       : "off"),
@@ -170,6 +174,8 @@ extension AppState {
                       : "off"),
             ]),
             .init(title: "GAIN STAGING", rows: [
+                .init(label: "4-band EQ", value: bandEQ.allSatisfy { $0 == 0 } ? "flat"
+                      : String(format: "low %+.1f · mid %+.1f · hi-mid %+.1f · high %+.1f dB", bandEQ[0], bandEQ[1], bandEQ[2], bandEQ[3])),
                 .init(label: "Pre-amp",   value: String(format: "%+.1f dB", preampDb)),
                 .init(label: "Dynamics",  value: dynamicsMode == .limiter
                       ? "Brickwall limiter, 20:1 @ 0 dBFS, 1 ms attack"

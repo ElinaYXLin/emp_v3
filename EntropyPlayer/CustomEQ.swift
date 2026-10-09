@@ -184,3 +184,50 @@ final class SubsonicFilter {
         self.y1[channel] = y1; self.y2[channel] = y2
     }
 }
+
+// MARK: - Four-band EQ
+
+// Simple 4-band tone control next to the Macro: Low (<100 Hz), Mid
+// (100–500 Hz), High-Mid (500 Hz–2 kHz) and High (>2 kHz), each ±12 dB.
+// Bands are split by subtraction (low = LP100(x), the rest minus LP500, …),
+// so with all gains at 0 dB the bands sum back to the input exactly.
+// The low-passes are 2-pole (two one-poles) for gentle, overlap-free
+// shelving; gains glide over ~30 ms so dragging a slider doesn't zipper.
+final class FourBandEQ {
+    private static let sr = 44100.0
+    private static let cuts = [100.0, 500.0, 2000.0]
+    private let coefs = FourBandEQ.cuts.map { 1 - exp(-2 * Double.pi * $0 / FourBandEQ.sr) }
+    private let lock = NSLock()
+    private var target = [1.0, 1.0, 1.0, 1.0], gain = [1.0, 1.0, 1.0, 1.0]
+    private var st = [[Double]](repeating: [Double](repeating: 0, count: 6), count: 2)
+
+    /// dB per band: low, mid, high-mid, high (−12…+12).
+    func setGains(db: [Double]) {
+        lock.lock()
+        target = (0..<4).map { pow(10, max(-12, min(12, $0 < db.count ? db[$0] : 0)) / 20) }
+        lock.unlock()
+    }
+
+    func process(_ buf: UnsafeMutablePointer<Float>, count: Int, channel ch: Int) {
+        lock.lock(); let t = target; lock.unlock()
+        if ch == 0 {
+            let g = 1 - exp(-Double(count) / (0.03 * Self.sr))
+            for k in 0..<4 { gain[k] += (t[k] - gain[k]) * g }
+        }
+        let flat = gain.allSatisfy { abs($0 - 1) < 1e-4 } && t.allSatisfy { $0 == 1 }
+        var s = st[ch]
+        let c0 = coefs[0], c1 = coefs[1], c2 = coefs[2]
+        let g0 = gain[0], g1 = gain[1], g2 = gain[2], g3 = gain[3]
+        for i in 0..<count {
+            let x = Double(buf[i])
+            s[0] += c0 * (x - s[0]); s[1] += c0 * (s[0] - s[1]); let low = s[1]
+            let r1 = x - low
+            s[2] += c1 * (r1 - s[2]); s[3] += c1 * (s[2] - s[3]); let mid = s[3]
+            let r2 = r1 - mid
+            s[4] += c2 * (r2 - s[4]); s[5] += c2 * (s[4] - s[5]); let hmid = s[5]
+            let high = r2 - hmid
+            if !flat { buf[i] = Float(low * g0 + mid * g1 + hmid * g2 + high * g3) }
+        }
+        st[ch] = s
+    }
+}

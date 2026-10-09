@@ -30,6 +30,8 @@ struct ChainSettings {
     var hysteresis = 0.0, sag = 0.0
     var fuzz = 0.0, bloom = 0.0, fur = 0.0, wobble = 0.0
     var wow = 0.0, erase = 0.0
+    var depth = 0.0
+    var bandEQ = [0.0, 0.0, 0.0, 0.0]
     var choirVoices = 0.0, choirDetune = 0.0, choirDelay = 0.0, choirVibrato = 0.0
     var rolloff = 0.0
     var compressor = false
@@ -67,6 +69,7 @@ enum ReportMeasurer {
         let sg = TapeSag(); sg.setStrength(s.sag)
         let er = TapeSelfErasure(); er.setStrength(s.erase)
         let fs1 = SubsonicFilter(), fs2 = SubsonicFilter()
+        let beq = FourBandEQ(); beq.setGains(db: s.bandEQ)
         let ta = TubeAmp(); ta.setFuzz(s.fuzz); ta.setBloom(s.bloom); ta.setFur(s.fur)
         let ro = HighRolloff(); ro.setSlope(dbPerOctave: s.rolloff)
         let dyn = WebAudioCompressor(); dyn.setSampleRate(sr)
@@ -95,6 +98,7 @@ enum ReportMeasurer {
                 sg.process(left: q, right: nil, count: c)
                 ta.process(left: q, right: nil, count: c)
                 for j in 0..<c { q[j] /= fixedDrive }     // fixed +7 dB is undone after the saturation stage
+                beq.process(q, count: c, channel: 0)
                 fs1.process(q, count: c, channel: 0); fs2.process(q, count: c, channel: 0)
                 dyn.process(left: q, right: nil, count: c)
                 i += c
@@ -114,6 +118,7 @@ enum ReportMeasurer {
         ch.setDelay(s.choirDelay); ch.setVibrato(s.choirVibrato)
         let rv = ConvolutionReverb(); rv.setDecay(s.reverbDecaySec)
         let sh = Shimmer(); sh.setStrength(s.shimmer)
+        let dp = Depth(); dp.setAmount(s.depth); dp.setBlur(s.shimmer)
         var l = input, r = input
         l.withUnsafeMutableBufferPointer { lb in
             r.withUnsafeMutableBufferPointer { rb in
@@ -126,6 +131,7 @@ enum ReportMeasurer {
                     gr.process(left: a, right: b, count: c)
                     rv.process(left: a, right: b, count: c)
                     sh.process(left: a, right: b, count: c)
+                    dp.process(left: a, right: b, count: c)
                     i += c
                 }
             }

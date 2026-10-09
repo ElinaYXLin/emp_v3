@@ -28,7 +28,8 @@ struct ContentView: View {
 
     static let pageWidth: CGFloat = 740
     static let columnWidth: CGFloat = 220
-    static let sidePanelsWidth: CGFloat = 68 * 3          // pre-amp | macro, post-gain
+    static let sidePanelsWidth: CGFloat = 68 * 3 + Self.bandEQWidth + 14   // pre-amp | macro, 4-band EQ, post-gain
+    static let bandEQWidth: CGFloat = 140
     /// Window content width at which both pages fit side by side.
     static let bothPagesWidth: CGFloat = sidePanelsWidth + pageWidth * 2 + 14 * 4 + 28
 
@@ -337,6 +338,7 @@ struct ContentView: View {
             }
             Spacer(minLength: 0)
             macroSliderPanel
+            bandEQPanel
             postGainPanel
         }
         .padding(14)
@@ -389,8 +391,32 @@ struct ContentView: View {
     }
 
     var effectsPage: some View {
+        // Columns follow the signal flow: Spectral Haze → Temporal Haze →
+        // Color. Saturator Recipes sits under Spectral Haze (the shortest
+        // column, 3 knobs) so the page stays a neat rectangle.
         page("Effects") {
             HStack(alignment: .top, spacing: 22) {
+                VStack(alignment: .leading, spacing: 16) {
+                    knobGroup("Spectral Haze") {
+                        knobRow(key: "gd",     label: "Grp Delay", sub: "Periods",
+                                display: { String(format: "%.1fx", $0/100*20) })
+                        knobRow(key: "gdrand", label: "GD Random", sub: "Drift",
+                                display: { String(format: "±%.0f%%", $0/100*50) })
+                        knobRow(key: "blur",   label: "Spec Blur", sub: "Linger",
+                                display: { String(format: "%.1fs", 0.1 + $0/100*2.4) })
+                    }
+                    recipesBox.frame(width: Self.columnWidth)
+                }
+                knobGroup("Temporal Haze") {
+                    knobRow(key: "reverb",  label: "Reverb",     sub: "Decay time",
+                            display: { String(format: "%.1fs", pow($0/100, 2) * 20) })
+                    knobRow(key: "shimmer", label: "Shimmer",    sub: "Octave down",
+                            display: { "\(Int($0))%" })
+                    knobRow(key: "depth",   label: "Depth",      sub: "Undertones",
+                            display: { "\(Int($0))%" })
+                    knobRow(key: "grain",   label: "Grain Echo", sub: "Memory",
+                            display: { String(format: "%.0fms", $0/100*200) })
+                }
                 knobGroup("Color") {
                     knobRow(key: "eq",      label: "Lo-Mid EQ", sub: "Gain",
                             display: { String(format: "%.1fdB", $0/100*12) })
@@ -401,29 +427,6 @@ struct ContentView: View {
                     knobRow(key: "rolloff", label: "High Roll", sub: "dB/oct >1k",
                             display: { String(format: "%.1fdB/oct", $0/100*6) })
                 }
-                // Right two thirds: the haze columns, with Saturator Recipes
-                // filling the corner under them so the page is a rectangle.
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(alignment: .top, spacing: 22) {
-                        knobGroup("Spectral Haze") {
-                            knobRow(key: "gd",     label: "Grp Delay", sub: "Periods",
-                                    display: { String(format: "%.1fx", $0/100*20) })
-                            knobRow(key: "gdrand", label: "GD Random", sub: "Drift",
-                                    display: { String(format: "±%.0f%%", $0/100*50) })
-                            knobRow(key: "blur",   label: "Spec Blur", sub: "Linger",
-                                    display: { String(format: "%.1fs", 0.1 + $0/100*2.4) })
-                        }
-                        knobGroup("Temporal Haze") {
-                            knobRow(key: "reverb",  label: "Reverb",     sub: "Decay time",
-                                    display: { String(format: "%.1fs", pow($0/100, 2) * 20) })
-                            knobRow(key: "shimmer", label: "Shimmer",    sub: "Octave down",
-                                    display: { "\(Int($0))%" })
-                            knobRow(key: "grain",   label: "Grain Echo", sub: "Memory",
-                                    display: { String(format: "%.0fms", $0/100*200) })
-                        }
-                    }
-                    recipesBox
-                }
             }
         }
     }
@@ -433,7 +436,7 @@ struct ContentView: View {
             Text("SATURATOR RECIPES")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundColor(Color(hex:"#d9d1bf").opacity(0.35))
-            HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
                 Picker("", selection: Binding(get: { app.satRecipe }, set: { app.setRecipe($0) })) {
                     ForEach(SaturatorRecipe.all, id: \.name) { r in Text(r.name).tag(r.name) }
                 }
@@ -560,6 +563,34 @@ struct ContentView: View {
             .padding(8)
         }
         .frame(width: 68)
+    }
+
+    // MARK: Four-band EQ
+
+    var bandEQPanel: some View {
+        // One column of knobs, highs on top, lows at the bottom.
+        let bands: [(k: Int, name: String, range: String)] = [
+            (3, "High", ">2 kHz"), (2, "Hi-Mid", "0.5–2 kHz"), (1, "Mid", "100–500 Hz"), (0, "Low", "<100 Hz")]
+        return ZStack {
+            panelBG
+            VStack(alignment: .leading, spacing: 14) {
+                Text("EQ")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundColor(Color(hex: "#8f8778"))
+                ForEach(bands, id: \.k) { b in
+                    KnobView(label: b.name, sublabel: b.range,
+                             value: Binding(get: { (app.bandEQ[b.k] + 12) / 24 * 100 },   // −12→+12 dB maps 0→100
+                                            set: { var e = app.bandEQ; e[b.k] = ($0 / 100 * 24 - 12).rounded(toPlaces: 1); app.bandEQ = e }),
+                             display: { v in
+                                 let db = v / 100 * 24 - 12
+                                 return abs(db) < 0.05 ? "0 dB" : String(format: "%+.1f dB", db) })
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+        }
+        .frame(width: Self.bandEQWidth)
+        .help("4-band EQ, ±12 dB per band; 12 o'clock is 0 dB.")
     }
 
     // MARK: Post-gain (final output volume, sent to the actual output device)
@@ -692,4 +723,8 @@ enum WindowSizer {
             window.setFrame(frame, display: true, animate: false)
         }
     }
+}
+
+private extension Double {
+    func rounded(toPlaces p: Int) -> Double { let m = pow(10, Double(p)); return (self * m).rounded() / m }
 }

@@ -16,12 +16,19 @@ import Foundation
 // Octave-down shifter: a delay line read by two taps whose delays ramp at
 // 0.5 samples/sample (→ half speed), half a cycle apart, crossfaded with
 // sin² windows that always sum to 1. Realtime-safe: fixed buffers only.
+//
+// Looseness: the shifter reads from a wandering extra delay, so the glow
+// lags the music by up to 200 ms (scaling with strength) and that lag
+// drifts to a new random point every 1.5–4 s. The drift gently stretches
+// and compresses the octave-down waveform (a slight, slow pitch sway), and
+// a soft saturation in the loop roughens it a touch, so the shimmer feels
+// played rather than mechanical.
 final class Shimmer {
 
     private static let sampleRate = 44100.0
     private static let maxMix = 1.0
     private static let window = 2048.0               // shifter window, ~46 ms
-    private static let shiftSize = 1 << 13
+    private static let shiftSize = 1 << 14             // room for the 200 ms looseness delay
     private static let apDelays: [[Int]] = [[556, 441, 341, 225], [579, 464, 356, 248]]
     private static let apGain: Float = 0.6
     private static let loopDelay = 2600              // ~59 ms before feeding back
@@ -37,6 +44,7 @@ final class Shimmer {
     private let shiftBuf = UnsafeMutablePointer<Float>.allocate(capacity: Shimmer.shiftSize)
     private var shiftWrite = 0
     private var shiftPhase = 0.0
+    private var lagFrom = 0.8, lagTo = 0.8, lagPos = 0.0, lagLen = 88200.0, lagRng: UInt64 = 0x51A3_70E1_D00D_F00D
 
     // Per channel: 4 allpasses + a loop delay.
     private let apBufs: [[UnsafeMutablePointer<Float>]]
@@ -101,6 +109,10 @@ final class Shimmer {
         let glide = 1 - exp(-1 / (0.05 * Self.sampleRate))
         let mask = Self.shiftSize - 1
         let W = Self.window, slope = 0.5 / W          // phase advance per sample for ratio 0.5
+        func lagRand() -> Double {
+            lagRng ^= lagRng << 13; lagRng ^= lagRng >> 7; lagRng ^= lagRng << 17
+            return Double(lagRng >> 11) / Double(1 << 53)
+        }
 
         for i in 0..<count {
             strength += (target - strength) * glide
@@ -120,7 +132,19 @@ final class Shimmer {
             // skipping two sin() calls per sample.
             let g1 = lowQuality ? Float(4 * p1 * (1 - p1)) : Float(sin(Double.pi * p1))
             let g2 = lowQuality ? Float(4 * p2 * (1 - p2)) : Float(sin(Double.pi * p2))
-            var y = readShift(4 + p1 * W) * g1 * g1 + readShift(4 + p2 * W) * g2 * g2
+            // Wandering lag: 0.6–1.0 × (200 ms × strength), cosine glides.
+            lagPos += 1
+            if lagPos >= lagLen {
+                lagPos = 0; lagFrom = lagTo
+                lagTo = 0.6 + 0.4 * lagRand()
+                lagLen = (1.5 + 2.5 * lagRand()) * Self.sampleRate
+            }
+            let e = 0.5 - 0.5 * cos(Double.pi * lagPos / lagLen)
+            let lag = (lagFrom + (lagTo - lagFrom) * e) * 0.200 * Self.sampleRate * strength
+            var y = readShift(4 + lag + p1 * W) * g1 * g1 + readShift(4 + lag + p2 * W) * g2 * g2
+            // A touch of soft saturation so the glow isn't glassy-clean.
+            let drive = Float(1 + 1.5 * strength)
+            y = Float(tanh(Double(y * drive))) / drive
             shiftPhase += slope
             if shiftPhase >= 1 { shiftPhase -= 1 }
 

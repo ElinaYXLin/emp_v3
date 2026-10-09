@@ -74,6 +74,8 @@ final class AudioEngine {
     // the reverb so its grains blur into the reverb tail.
     private let grainEcho        = GrainEcho()
     private let choir            = Choir()
+    private let depth            = Depth()
+    private let bandEQ           = FourBandEQ()
     // Spectral haze: per-frequency level slew (see SpectralBlur.swift).
     private let spectralBlur     = SpectralBlur()
     // Temporal haze: octave-down feedback glow after the reverb (see Shimmer.swift).
@@ -372,6 +374,7 @@ final class AudioEngine {
         grainEcho.process(left: l, right: r, count: n)
         reverbFilter.process(left: l, right: r, count: n)
         shimmer.process(left: l, right: r, count: n)
+        depth.process(left: l, right: r, count: n)
 
         eqFilter.process(l, count: n, channel: 0)
         eqFilter.process(r, count: n, channel: 1)
@@ -405,6 +408,7 @@ final class AudioEngine {
         vDSP_vsmul(l, 1, &gInv, l, 1, vDSP_Length(n))
         vDSP_vsmul(r, 1, &gInv, r, 1, vDSP_Length(n))
 
+        bandEQ.process(l, count: n, channel: 0); bandEQ.process(r, count: n, channel: 1)
         finalSub1.process(l, count: n, channel: 0); finalSub1.process(r, count: n, channel: 1)
         finalSub2.process(l, count: n, channel: 0); finalSub2.process(r, count: n, channel: 1)
         compressor.process(left: l, right: r, count: n)
@@ -585,6 +589,13 @@ final class AudioEngine {
     func setTapeSag(effective eff: Float) {
         tapeSag.setStrength(Double(eff))
     }
+
+    /// Depth (undertones): effective 0–1 (see Depth.swift).
+    func setDepth(effective eff: Float) { depth.setAmount(Double(eff)) }
+    /// Depth swell/linger follow the Shimmer knob.
+    func setDepthBlur(effective eff: Float) { depth.setBlur(Double(eff)) }
+    /// Four-band EQ gains in dB: low, mid, high-mid, high.
+    func setBandEQ(db: [Double]) { bandEQ.setGains(db: db) }
 
     /// Tape wow & flutter / self-erasure: effective 0–1 (see Tape.swift).
     func setTapeWow(effective eff: Float) { tapeWow.setStrength(Double(eff)) }

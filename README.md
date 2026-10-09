@@ -42,6 +42,7 @@ Every effect knob is a **sensitivity**: how strongly the **Macro** slider drives
 
 Other controls:
 
+- **4-band EQ** (a column of knobs between Macro and Post-Gain, highs on top): High >2 kHz, High-Mid 500 Hz–2 kHz, Mid 100–500 Hz, Low <100 Hz, ±12 dB each; 12 o’clock is 0 dB. Remembered between launches.
 - **Pre-Amp** and **Post-Gain** sliders: input trim and clean output volume (Post-Gain goes up to +48 dB; the output ceiling still catches peaks).
 - **Limiter / Compressor**: the final dynamics stage, with an always-on safety ceiling after it. Just before it, a 24 dB/oct high-pass at 25 Hz removes sub-bass pumping (1–2 Hz wobble, woofer rattle).
 - **FX presets**: 40 presets for the Effects page, grouped by vibe (Nostalgic, Calming, Inspiring, Dreamy, Playful), plus **INIT**. They set every Effects-page knob, the saturator recipe and the macro, and leave the Emulation page alone.
@@ -72,7 +73,8 @@ Signal flow: **Choir → Spectral Haze → Temporal Haze → Color → Tape → 
 | Knob | What it does |
 |---|---|
 | Reverb | Convolution reverb with a tail that darkens as it decays; the knob is quadratic for fine control |
-| Shimmer | Octave-down feedback glow under the music |
+| Shimmer | Octave-down feedback glow under the music. It lags the music by up to 200 ms (more as the knob rises) and that lag drifts, so the glow gently stretches and sways instead of sounding mechanical |
+| Depth | Undertones (f/2, f/3, f/4, f/5) of the 700 Hz–5 kHz band, made in the frequency domain (~23 ms behind) and heavily blurred so they swell in and linger like a pad (swell and linger follow the Shimmer knob), and low-passed at 1.1 kHz so they stay round; 0 is the original note only, and each step up adds a deeper undertone |
 | Grain Echo | Short detuned grains replayed from the last ≤200 ms, like music echoing from memory |
 
 **Recipes and Tape** (Saturator Recipes on the Effects page; Hysteresis and Tape Sag on Emulation › Tape)
@@ -138,6 +140,7 @@ EntropyPlayer/
   Tape.swift                 tape hysteresis and sag
   TubeAmp.swift              transformer fuzz, bass bloom, bias-shift fur
   Choir.swift                ensemble of detuned, delayed, panned singers
+  Depth.swift                undertones (subharmonics) of the upper band
   CustomEQ.swift             lo-mid bell, high roll-off, subsonic filter
   CustomDynamics.swift       limiter/compressor
   Presets.swift              FX and Emulation presets

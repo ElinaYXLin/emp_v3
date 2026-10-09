@@ -12,7 +12,7 @@ struct AppSettings: Codable {
     var macro:        Double = 0
     var sensitivity:  [String: Double] = AppSettings.defaultSensitivities
     var ranges:       [String: RangeValue] = [
-        "reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init()
+        "reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "depth": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init()
     ]
     var recipe:       String? = nil      // optional: older files predate recipes
     var order:        String = "alpha"
@@ -24,7 +24,7 @@ struct AppSettings: Codable {
 
     /// Knobs added after older settings files/presets were written start at 0.
     static func defaultSensitivity(_ key: String) -> Double {
-        ["fuzz", "bloom", "fur", "voices", "detune", "cdelay", "cvib", "wobble", "wow", "erase"].contains(key) ? 0 : 50
+        ["depth", "fuzz", "bloom", "fur", "voices", "detune", "cdelay", "cvib", "wobble", "wow", "erase"].contains(key) ? 0 : 50
     }
 }
 
@@ -38,14 +38,22 @@ final class AppState: ObservableObject {
     @Published var preampDb: Double = 0           // -12…0
     @Published var postGainDb: Double = 0         // -24…48, final output volume trim/boost
     @Published var sensitivity: [String: Double] = AppSettings.defaultSensitivities
-    @Published var ranges: [String: RangeValue]  = ["reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init()]
+    @Published var ranges: [String: RangeValue]  = ["reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "depth": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init()]
     @Published var waveColor: Color = Color(hex: "#35d6d0")
     @Published var satRecipe: String = SaturatorRecipe.classic.name
     /// Audio quality mode (persisted). Low = cheaper versions of the heaviest effects.
+    /// Four-band EQ next to the macro (dB: low, mid, high-mid, high), persisted.
+    @Published var bandEQ: [Double] = (UserDefaults.standard.array(forKey: "bandEQ") as? [Double]) ?? [0, 0, 0, 0] {
+        didSet {
+            UserDefaults.standard.set(bandEQ, forKey: "bandEQ")
+            audio.setBandEQ(db: bandEQ)
+        }
+    }
     @Published var lowQuality: Bool = UserDefaults.standard.bool(forKey: "quality.low") {
         didSet {
             UserDefaults.standard.set(lowQuality, forKey: "quality.low")
             audio.setLowQuality(lowQuality)
+        audio.setBandEQ(db: bandEQ)
         }
     }
     @Published var isExporting = false
@@ -208,6 +216,8 @@ final class AppState: ObservableObject {
         audio.setGroupDelay(effective: effective("gd"))
         audio.setGroupDelayRandomness(effective: effective("gdrand"))
         audio.setGrainEcho(effective: effective("grain"))
+        audio.setDepth(effective: effective("depth"))
+        audio.setDepthBlur(effective: effective("shimmer"))
         audio.setChoir(voices: effective("voices"), detune: effective("detune"), delay: effective("cdelay"), vibrato: effective("cvib"))
         audio.setSpectralBlur(effective: effective("blur"))
         audio.setShimmer(effective: effective("shimmer"))
