@@ -83,7 +83,7 @@ extension AppState {
 
         var cs = ChainSettings()
         cs.preampDb = preampDb; cs.eqDb = eqDb; cs.evenDb = evenDb; cs.oddDb = oddDb
-        cs.recipe = recipe; cs.hysteresis = hyst; cs.sag = sag; cs.depth = depthAmt; cs.bandEQ = bandEQ; cs.wow = wow; cs.erase = erase; cs.wobble = wobble; cs.fuzz = fuzz; cs.bloom = bloom; cs.fur = fur; cs.choirVoices = cVoices; cs.choirDetune = cDetune; cs.choirDelay = cDelay; cs.choirVibrato = cVib; cs.rolloff = rollSlope
+        cs.recipe = recipe; cs.hysteresis = hyst; cs.sag = sag; cs.depth = depthAmt; cs.bandEQ = bandEQ; cs.postTube = postTube / 100; cs.wow = wow; cs.erase = erase; cs.wobble = wobble; cs.fuzz = fuzz; cs.bloom = bloom; cs.fur = fur; cs.choirVoices = cVoices; cs.choirDetune = cDetune; cs.choirDelay = cDelay; cs.choirVibrato = cVib; cs.rolloff = rollSlope
         cs.compressor = dynamicsMode == .compressor
         cs.gdScale = gdScale; cs.blur = blur; cs.grain = grain
         cs.reverbDecaySec = decaySec; cs.shimmer = shimmer
@@ -176,6 +176,9 @@ extension AppState {
             .init(title: "GAIN STAGING", rows: [
                 .init(label: "4-band EQ", value: bandEQ.allSatisfy { $0 == 0 } ? "flat"
                       : String(format: "low %+.1f · mid %+.1f · hi-mid %+.1f · high %+.1f dB", bandEQ[0], bandEQ[1], bandEQ[2], bandEQ[3])),
+                .init(label: "Post tube", value: postTube > 0.5
+                      ? String(format: "%.0f%%: %.1f dB even-sat drive after the EQ, %@ recipe", postTube, min(24, postTube / 100 * 18 * recipe.evenMul), recipe.name)
+                      : "off"),
                 .init(label: "Pre-amp",   value: String(format: "%+.1f dB", preampDb)),
                 .init(label: "Dynamics",  value: dynamicsMode == .limiter
                       ? "Brickwall limiter, 20:1 @ 0 dBFS, 1 ms attack"

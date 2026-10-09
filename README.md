@@ -43,6 +43,7 @@ Every effect knob is a **sensitivity**: how strongly the **Macro** slider drives
 Other controls:
 
 - **4-band EQ** (a column of knobs between Macro and Post-Gain, highs on top): High >2 kHz, High-Mid 500 Hz–2 kHz, Mid 100–500 Hz, Low <100 Hz, ±12 dB each; 12 o’clock is 0 dB. Remembered between launches.
+- **Tube** knob (under the EQ): a second tube (even) saturator after the EQ, voiced by the recipe selected under Saturator Recipes; the knob sets its drive (0–18 dB) and 0 is fully bypassed.
 - **Pre-Amp** and **Post-Gain** sliders: input trim and clean output volume (Post-Gain goes up to +48 dB; the output ceiling still catches peaks).
 - **Limiter / Compressor**: the final dynamics stage, with an always-on safety ceiling after it. Just before it, a 24 dB/oct high-pass at 25 Hz removes sub-bass pumping (1–2 Hz wobble, woofer rattle).
 - **FX presets**: 40 presets for the Effects page, grouped by vibe (Nostalgic, Calming, Inspiring, Dreamy, Playful), plus **INIT**. They set every Effects-page knob, the saturator recipe and the macro, and leave the Emulation page alone.
@@ -52,7 +53,7 @@ Other controls:
 
 ### Effects
 
-Signal flow: **Choir → Spectral Haze → Temporal Haze (Grain Echo → Shimmer → Depth → Reverb, so the shimmer and undertones are reverberated) → Color → Tape → Tube Amp → dynamics → output**. Every effect is level-matched, so turning one up doesn't simply make things louder or push the limiter. The Lo-Mid EQ and High Roll-off are the exceptions, since changing tone is their job.
+Signal flow: **Choir → Color → Temporal Haze (Grain Echo → Shimmer → Depth → Reverb, so the shimmer and undertones are built from the saturated signal and reverberated) → Spectral Haze (smearing the tails too) → Tape → Tube Amp → dynamics → output**. Every effect is level-matched, so turning one up doesn't simply make things louder or push the limiter. The Lo-Mid EQ and High Roll-off are the exceptions, since changing tone is their job.
 
 **Color**
 | Knob | What it does |

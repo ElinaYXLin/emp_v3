@@ -49,6 +49,13 @@ final class AppState: ObservableObject {
             audio.setBandEQ(db: bandEQ)
         }
     }
+    /// Post tube saturator under the EQ (0–100), persisted.
+    @Published var postTube: Double = UserDefaults.standard.double(forKey: "postTube") {
+        didSet {
+            UserDefaults.standard.set(postTube, forKey: "postTube")
+            audio.setPostTube(amount: postTube / 100, recipe: SaturatorRecipe.named(satRecipe))
+        }
+    }
     @Published var lowQuality: Bool = UserDefaults.standard.bool(forKey: "quality.low") {
         didSet {
             UserDefaults.standard.set(lowQuality, forKey: "quality.low")
@@ -227,6 +234,7 @@ final class AppState: ObservableObject {
         audio.setWobble(effective: effective("wobble"))
         audio.setTubeAmp(fuzz: effective("fuzz"), bloom: effective("bloom"), fur: effective("fur"))
         audio.setSaturatorRecipe(SaturatorRecipe.named(satRecipe))
+        audio.setPostTube(amount: postTube / 100, recipe: SaturatorRecipe.named(satRecipe))
         audio.setEQ(gainDb: effective("eq") * 12)
         audio.setSaturator(driveDb: effective("sat") * 16)
         audio.setOddSaturator(driveDb: effective("oddsat") * 16)

@@ -226,3 +226,60 @@ final class RecipeStage {
         toneLow.process(buf, count: count, channel: ch)
     }
 }
+
+// MARK: - Post tube saturator
+
+// A second tube (even) saturator after the 4-band EQ, voiced by the same
+// recipe as the Color stage (emphasis EQ, tube bias, harmonic recipe). The
+// knob sets the drive (0–18 dB × the recipe's even multiplier); the first
+// quarter of its travel also fades the stage in from fully dry, so 0 is
+// exactly bypassed and turning it up never jumps. Runs inside the same
+// fixed +7 dB drive as the Color stage so it's hit at the same level.
+final class PostTubeSaturator {
+    private let stage = RecipeStage()
+    private let sat = WebAudioSaturator(voicing: .even)
+    private let drive = Float(pow(10, 7.0 / 20))
+    private let lock = NSLock()
+    private var targetMix = 0.0, mix = 0.0
+    private let dryL = UnsafeMutablePointer<Float>.allocate(capacity: 4096)
+    private let dryR = UnsafeMutablePointer<Float>.allocate(capacity: 4096)
+
+    deinit { dryL.deallocate(); dryR.deallocate() }
+
+    /// amount 0…1, recipe as selected in the dropdown.
+    func configure(amount: Double, recipe r: SaturatorRecipe) {
+        let a = max(0, min(1, amount))
+        let driveDb = min(24, a * 18 * r.evenMul)
+        stage.configure(r, amount: driveDb / 16)
+        sat.setDrive(driveDb: driveDb)
+        sat.setBias(r.bias)
+        lock.lock(); targetMix = min(1, a * 4); lock.unlock()
+    }
+
+    func setLowQuality(_ on: Bool) { sat.setLowQuality(on); stage.setLowQuality(on) }
+
+    func process(left l: UnsafeMutablePointer<Float>, right r: UnsafeMutablePointer<Float>, count n: Int) {
+        lock.lock(); let t = targetMix; lock.unlock()
+        if t == 0 && mix < 1e-4 { mix = 0; return }
+        var off = 0
+        while off < n {
+            let c = min(4096, n - off), a = l + off, b = r + off
+            dryL.assign(from: a, count: c); dryR.assign(from: b, count: c)
+            for i in 0..<c { a[i] *= drive; b[i] *= drive }
+            for ch in 0..<2 {
+                let q = ch == 0 ? a : b
+                stage.pre(q, count: c, channel: ch)
+                sat.process(q, count: c, channel: ch)
+                stage.post(q, count: c, channel: ch)
+            }
+            let step = (t - mix) / Double(c)
+            for i in 0..<c {
+                mix += step
+                let w = Float(mix)
+                a[i] = dryL[i] + (a[i] / drive - dryL[i]) * w
+                b[i] = dryR[i] + (b[i] / drive - dryR[i]) * w
+            }
+            off += c
+        }
+    }
+}

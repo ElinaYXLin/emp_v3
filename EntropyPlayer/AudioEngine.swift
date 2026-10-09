@@ -76,6 +76,7 @@ final class AudioEngine {
     private let choir            = Choir()
     private let depth            = Depth()
     private let bandEQ           = FourBandEQ()
+    private let postTube         = PostTubeSaturator()
     // Spectral haze: per-frequency level slew (see SpectralBlur.swift).
     private let spectralBlur     = SpectralBlur()
     // Temporal haze: octave-down feedback glow after the reverb (see Shimmer.swift).
@@ -366,21 +367,19 @@ final class AudioEngine {
 
     /// The full DSP chain, in place, on the render thread.
     private func renderChain(left l: UnsafeMutablePointer<Float>, right r: UnsafeMutablePointer<Float>, count n: Int) {
-        // Emulation › Choir first, then the Effects page: spectral haze,
-        // temporal haze, color. The rest of Emulation (tape, tube amp) follows.
+        // Emulation › Choir first, then the Effects page: color, temporal
+        // haze, spectral haze (color first so the shimmer, undertones and
+        // reverb are built from the saturated signal; spectral haze last so
+        // it smears their tails too). The rest of Emulation (tape, tube amp)
+        // follows.
         choir.process(left: l, right: r, count: n)
-        groupDelay.process(left: l, right: r, count: n)
-        spectralBlur.process(left: l, right: r, count: n)
-        grainEcho.process(left: l, right: r, count: n)
-        shimmer.process(left: l, right: r, count: n)
-        depth.process(left: l, right: r, count: n)
-        reverbFilter.process(left: l, right: r, count: n)
 
         eqFilter.process(l, count: n, channel: 0)
         eqFilter.process(r, count: n, channel: 1)
         var g = preLimiterGainLinear
         vDSP_vsmul(l, 1, &g, l, 1, vDSP_Length(n))
         vDSP_vsmul(r, 1, &g, r, 1, vDSP_Length(n))
+        var gInv = 1 / preLimiterGainLinear
 
         // Color stage: subsonic cut → even saturator → odd saturator → high
         // roll-off (after both, so it also tames the harmonics they add).
@@ -394,8 +393,22 @@ final class AudioEngine {
         }
         highRolloff.process(l, count: n, channel: 0)
         highRolloff.process(r, count: n, channel: 1)
+        vDSP_vsmul(l, 1, &gInv, l, 1, vDSP_Length(n))
+        vDSP_vsmul(r, 1, &gInv, r, 1, vDSP_Length(n))
 
-        // Emulation › Tape, then Tube Amp — still inside the +7 dB drive.
+        // Temporal haze.
+        grainEcho.process(left: l, right: r, count: n)
+        shimmer.process(left: l, right: r, count: n)
+        depth.process(left: l, right: r, count: n)
+        reverbFilter.process(left: l, right: r, count: n)
+
+        // Spectral haze (after the temporal haze, so it smears the tails too).
+        groupDelay.process(left: l, right: r, count: n)
+        spectralBlur.process(left: l, right: r, count: n)
+
+        // Emulation › Tape, then Tube Amp — inside the same +7 dB drive.
+        vDSP_vsmul(l, 1, &g, l, 1, vDSP_Length(n))
+        vDSP_vsmul(r, 1, &g, r, 1, vDSP_Length(n))
         for ch in 0..<2 {
             let buf = ch == 0 ? l : r
             tapeHyst.process(buf, count: n, channel: ch)
@@ -404,11 +417,11 @@ final class AudioEngine {
         tapeSag.process(left: l, right: r, count: n)
         tapeWow.process(left: l, right: r, count: n)
         tubeAmp.process(left: l, right: r, count: n)
-        var gInv = 1 / preLimiterGainLinear
         vDSP_vsmul(l, 1, &gInv, l, 1, vDSP_Length(n))
         vDSP_vsmul(r, 1, &gInv, r, 1, vDSP_Length(n))
 
         bandEQ.process(l, count: n, channel: 0); bandEQ.process(r, count: n, channel: 1)
+        postTube.process(left: l, right: r, count: n)
         finalSub1.process(l, count: n, channel: 0); finalSub1.process(r, count: n, channel: 1)
         finalSub2.process(l, count: n, channel: 0); finalSub2.process(r, count: n, channel: 1)
         compressor.process(left: l, right: r, count: n)
@@ -577,6 +590,7 @@ final class AudioEngine {
         oddSatFilter.setLowQuality(on)
         shimmer.setLowQuality(on)
         depth.setLowQuality(on)
+        postTube.setLowQuality(on)
         grainEcho.setLowQuality(on)
         choir.setLowQuality(on)
     }
@@ -595,6 +609,8 @@ final class AudioEngine {
     func setDepth(effective eff: Float) { depth.setAmount(Double(eff)) }
     /// Four-band EQ gains in dB: low, mid, high-mid, high.
     func setBandEQ(db: [Double]) { bandEQ.setGains(db: db) }
+    /// Post tube saturator (under the EQ): amount 0–1, voiced by the selected recipe.
+    func setPostTube(amount: Double, recipe: SaturatorRecipe) { postTube.configure(amount: amount, recipe: recipe) }
 
     /// Tape wow & flutter / self-erasure: effective 0–1 (see Tape.swift).
     func setTapeWow(effective eff: Float) { tapeWow.setStrength(Double(eff)) }

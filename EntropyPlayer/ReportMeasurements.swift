@@ -32,6 +32,7 @@ struct ChainSettings {
     var wow = 0.0, erase = 0.0
     var depth = 0.0
     var bandEQ = [0.0, 0.0, 0.0, 0.0]
+    var postTube = 0.0
     var choirVoices = 0.0, choirDetune = 0.0, choirDelay = 0.0, choirVibrato = 0.0
     var rolloff = 0.0
     var compressor = false
@@ -70,6 +71,8 @@ enum ReportMeasurer {
         let er = TapeSelfErasure(); er.setStrength(s.erase)
         let fs1 = SubsonicFilter(), fs2 = SubsonicFilter()
         let beq = FourBandEQ(); beq.setGains(db: s.bandEQ)
+        let pt = PostTubeSaturator(); pt.configure(amount: s.postTube, recipe: s.recipe)
+        var ptScratch = [Float](repeating: 0, count: 470)
         let ta = TubeAmp(); ta.setFuzz(s.fuzz); ta.setBloom(s.bloom); ta.setFur(s.fur)
         let ro = HighRolloff(); ro.setSlope(dbPerOctave: s.rolloff)
         let dyn = WebAudioCompressor(); dyn.setSampleRate(sr)
@@ -99,6 +102,10 @@ enum ReportMeasurer {
                 ta.process(left: q, right: nil, count: c)
                 for j in 0..<c { q[j] /= fixedDrive }     // fixed +7 dB is undone after the saturation stage
                 beq.process(q, count: c, channel: 0)
+                ptScratch.withUnsafeMutableBufferPointer { sb in      // mono: the right channel is scratch
+                    sb.baseAddress!.assign(from: q, count: c)
+                    pt.process(left: q, right: sb.baseAddress!, count: c)
+                }
                 fs1.process(q, count: c, channel: 0); fs2.process(q, count: c, channel: 0)
                 dyn.process(left: q, right: nil, count: c)
                 i += c

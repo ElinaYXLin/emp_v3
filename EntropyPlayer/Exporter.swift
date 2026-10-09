@@ -32,7 +32,7 @@ final class OfflineChain {
     private let th = TapeHysteresis(), sg = TapeSag(), ta = TubeAmp(), ro = HighRolloff()
     private let wf = TapeWowFlutter(), er = TapeSelfErasure()
     private let fs1 = SubsonicFilter(), fs2 = SubsonicFilter()
-    private let dp = Depth(), beq = FourBandEQ()
+    private let dp = Depth(), beq = FourBandEQ(), pt = PostTubeSaturator()
     private let dyn = WebAudioCompressor(), ceiling = WebAudioCompressor()
     private let inGain: Float, fixedDrive: Float, postGain: Float
 
@@ -47,7 +47,7 @@ final class OfflineChain {
         ev.setDrive(driveDb: min(24, s.evenDb * s.recipe.evenMul)); ev.setBias(s.recipe.bias); ev.setWobble(s.wobble)
         od.setDrive(driveDb: min(24, s.oddDb * s.recipe.oddMul))
         th.setStrength(s.hysteresis); sg.setStrength(s.sag); ro.setSlope(dbPerOctave: s.rolloff)
-        dp.setAmount(s.depth); beq.setGains(db: s.bandEQ)
+        dp.setAmount(s.depth); beq.setGains(db: s.bandEQ); pt.configure(amount: s.postTube, recipe: s.recipe)
         wf.setStrength(s.wow); er.setStrength(s.erase)
         ta.setFuzz(s.fuzz); ta.setBloom(s.bloom); ta.setFur(s.fur)
         dyn.setSampleRate(Self.sampleRate)
@@ -74,12 +74,6 @@ final class OfflineChain {
             let n = min(470, total - done), a = l + done, b = r + done
             for i in 0..<n { a[i] *= inGain; b[i] *= inGain }
             ch.process(left: a, right: b, count: n)
-            gd.process(left: a, right: b, count: n)
-            bl.process(left: a, right: b, count: n)
-            gr.process(left: a, right: b, count: n)
-            sh.process(left: a, right: b, count: n)
-            dp.process(left: a, right: b, count: n)
-            rv.process(left: a, right: b, count: n)
             eq.process(a, count: n, channel: 0); eq.process(b, count: n, channel: 1)
             for i in 0..<n { a[i] *= fixedDrive; b[i] *= fixedDrive }
             for ch in 0..<2 {
@@ -91,6 +85,15 @@ final class OfflineChain {
                 rs.post(q, count: n, channel: ch)
             }
             ro.process(a, count: n, channel: 0); ro.process(b, count: n, channel: 1)
+            for i in 0..<n { a[i] /= fixedDrive; b[i] /= fixedDrive }
+            // Temporal haze after Color (built from the saturated signal).
+            gr.process(left: a, right: b, count: n)
+            sh.process(left: a, right: b, count: n)
+            dp.process(left: a, right: b, count: n)
+            rv.process(left: a, right: b, count: n)
+            gd.process(left: a, right: b, count: n)
+            bl.process(left: a, right: b, count: n)
+            for i in 0..<n { a[i] *= fixedDrive; b[i] *= fixedDrive }
             for ch in 0..<2 {
                 let q = ch == 0 ? a : b
                 th.process(q, count: n, channel: ch)
@@ -101,6 +104,7 @@ final class OfflineChain {
             ta.process(left: a, right: b, count: n)
             for i in 0..<n { a[i] /= fixedDrive; b[i] /= fixedDrive }
             beq.process(a, count: n, channel: 0); beq.process(b, count: n, channel: 1)
+            pt.process(left: a, right: b, count: n)
             fs1.process(a, count: n, channel: 0); fs1.process(b, count: n, channel: 1)
             fs2.process(a, count: n, channel: 0); fs2.process(b, count: n, channel: 1)
             dyn.process(left: a, right: b, count: n)
@@ -215,7 +219,7 @@ extension AppState {
         cs.oddDb = eff("oddsat") * 16
         cs.recipe = SaturatorRecipe.named(satRecipe)
         cs.hysteresis = eff("hyst"); cs.sag = eff("sag")
-        cs.depth = eff("depth"); cs.bandEQ = bandEQ
+        cs.depth = eff("depth"); cs.bandEQ = bandEQ; cs.postTube = postTube / 100
         cs.wow = eff("wow"); cs.erase = eff("erase"); cs.wobble = eff("wobble")
         cs.fuzz = eff("fuzz"); cs.bloom = eff("bloom"); cs.fur = eff("fur")
         cs.rolloff = eff("rolloff") * 6

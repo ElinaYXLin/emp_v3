@@ -391,21 +391,20 @@ struct ContentView: View {
     }
 
     var effectsPage: some View {
-        // Columns follow the signal flow: Spectral Haze → Temporal Haze →
-        // Color. Saturator Recipes sits under Spectral Haze (the shortest
+        // Columns follow the signal flow: Color → Temporal Haze → Spectral
+        // Haze. Saturator Recipes sits under Spectral Haze (the shortest
         // column, 3 knobs) so the page stays a neat rectangle.
         page("Effects") {
             HStack(alignment: .top, spacing: 22) {
-                VStack(alignment: .leading, spacing: 16) {
-                    knobGroup("Spectral Haze") {
-                        knobRow(key: "gd",     label: "Grp Delay", sub: "Periods",
-                                display: { String(format: "%.1fx", $0/100*20) })
-                        knobRow(key: "gdrand", label: "GD Random", sub: "Drift",
-                                display: { String(format: "±%.0f%%", $0/100*50) })
-                        knobRow(key: "blur",   label: "Spec Blur", sub: "Linger",
-                                display: { String(format: "%.1fs", 0.1 + $0/100*2.4) })
-                    }
-                    recipesBox.frame(width: Self.columnWidth)
+                knobGroup("Color") {
+                    knobRow(key: "eq",      label: "Lo-Mid EQ", sub: "Gain",
+                            display: { String(format: "%.1fdB", $0/100*12) })
+                    knobRow(key: "sat",     label: "Even Sat",  sub: "Gain",
+                            display: { String(format: "%.1fdB", $0/100*16) })
+                    knobRow(key: "oddsat",  label: "Odd Sat",   sub: "Gain",
+                            display: { String(format: "%.1fdB", $0/100*16) })
+                    knobRow(key: "rolloff", label: "High Roll", sub: "dB/oct >1k",
+                            display: { String(format: "%.1fdB/oct", $0/100*6) })
                 }
                 knobGroup("Temporal Haze") {
                     knobRow(key: "shimmer", label: "Shimmer",    sub: "Octave down",
@@ -417,15 +416,16 @@ struct ContentView: View {
                     knobRow(key: "grain",   label: "Grain Echo", sub: "Memory",
                             display: { String(format: "%.0fms", $0/100*200) })
                 }
-                knobGroup("Color") {
-                    knobRow(key: "eq",      label: "Lo-Mid EQ", sub: "Gain",
-                            display: { String(format: "%.1fdB", $0/100*12) })
-                    knobRow(key: "sat",     label: "Even Sat",  sub: "Gain",
-                            display: { String(format: "%.1fdB", $0/100*16) })
-                    knobRow(key: "oddsat",  label: "Odd Sat",   sub: "Gain",
-                            display: { String(format: "%.1fdB", $0/100*16) })
-                    knobRow(key: "rolloff", label: "High Roll", sub: "dB/oct >1k",
-                            display: { String(format: "%.1fdB/oct", $0/100*6) })
+                VStack(alignment: .leading, spacing: 16) {
+                    knobGroup("Spectral Haze") {
+                        knobRow(key: "gd",     label: "Grp Delay", sub: "Periods",
+                                display: { String(format: "%.1fx", $0/100*20) })
+                        knobRow(key: "gdrand", label: "GD Random", sub: "Drift",
+                                display: { String(format: "±%.0f%%", $0/100*50) })
+                        knobRow(key: "blur",   label: "Spec Blur", sub: "Linger",
+                                display: { String(format: "%.1fs", 0.1 + $0/100*2.4) })
+                    }
+                    recipesBox.frame(width: Self.columnWidth)
                 }
             }
         }
@@ -585,6 +585,12 @@ struct ContentView: View {
                                  let db = v / 100 * 24 - 12
                                  return abs(db) < 0.05 ? "0 dB" : String(format: "%+.1f dB", db) })
                 }
+                Divider().padding(.vertical, 2)
+                KnobView(label: "Tube", sublabel: SaturatorRecipe.named(app.satRecipe).name,
+                         value: Binding(get: { app.postTube }, set: { app.postTube = $0 }),
+                         display: { v in v < 0.5 ? "off" : String(format: "%.1f dB",
+                                     min(24, v / 100 * 18 * SaturatorRecipe.named(app.satRecipe).evenMul)) })
+                    .help("Post tube saturator: a second even (tube) saturator after the EQ, voiced by the recipe selected under Saturator Recipes.")
                 Spacer(minLength: 0)
             }
             .padding(10)
