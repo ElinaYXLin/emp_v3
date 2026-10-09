@@ -34,12 +34,26 @@ final class ConvolutionReverb {
         maxPartitions: Int(44100 * ConvolutionReverb.maxIRSeconds) / PartitionedConvolver.block + 1,
         identityDelay: nil)
 
+    // Low quality: one mono convolution of the mid signal with a tail capped
+    // at 0.75 s — ~5× less work than two 2 s convolutions. The wet signal
+    // loses its stereo decorrelation and very long tails are cut short.
+    private static let lowIRSeconds = 0.75
+    private let lowConvolver = PartitionedConvolver(
+        maxPartitions: Int(44100 * ConvolutionReverb.lowIRSeconds) / PartitionedConvolver.block + 1,
+        identityDelay: nil, channels: 1)
+    private var lowQualityFlag = false
+    private let mid = UnsafeMutablePointer<Float>.allocate(capacity: ConvolutionReverb.maxChunk)
+
+    func setLowQuality(_ on: Bool) {
+        lock.lock(); lowQualityFlag = on; lock.unlock()
+    }
+
     // Dry copy for the mix (audio thread only).
     private static let maxChunk = 4096
     private let dryL = UnsafeMutablePointer<Float>.allocate(capacity: ConvolutionReverb.maxChunk)
     private let dryR = UnsafeMutablePointer<Float>.allocate(capacity: ConvolutionReverb.maxChunk)
 
-    deinit { dryL.deallocate(); dryR.deallocate() }
+    deinit { dryL.deallocate(); dryR.deallocate(); mid.deallocate() }
 
     func setSampleRate(_ sr: Double) {
         lock.lock()
@@ -89,6 +103,9 @@ final class ConvolutionReverb {
         // noise per channel, for stereo decorrelation). Crossfaded in by the
         // convolver, so the running tail is never cut off.
         convolver.setFilter(convolver.makeFilter([irL, irR]))
+        var irMono = Array(irL.prefix(Int(sr * Self.lowIRSeconds)))
+        normalizeEnergy(&irMono)
+        lowConvolver.setFilter(lowConvolver.makeFilter([irMono]))
     }
 
     private func normalizeEnergy(_ ir: inout [Float]) {
@@ -109,7 +126,15 @@ final class ConvolutionReverb {
             let l = left + done, r = right.map { $0 + done }
             dryL.assign(from: l, count: n)
             if let r { dryR.assign(from: r, count: n) }
-            convolver.process(left: l, right: r, count: n)     // → wet
+            lock.lock(); let low = lowQualityFlag; lock.unlock()
+            if low {
+                for i in 0..<n { mid[i] = (l[i] + (r?[i] ?? l[i])) * 0.5 }
+                lowConvolver.process(left: mid, right: nil, count: n)   // → mono wet
+                l.assign(from: mid, count: n)
+                r?.assign(from: mid, count: n)
+            } else {
+                convolver.process(left: l, right: r, count: n)     // → wet
+            }
             for i in 0..<n { l[i] = (dryL[i] * 0.6 + l[i] * 0.8) * Self.levelComp }
             if let r { for i in 0..<n { r[i] = (dryR[i] * 0.6 + r[i] * 0.8) * Self.levelComp } }
             done += n

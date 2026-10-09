@@ -77,6 +77,20 @@ final class WebAudioSaturator {
         lock.unlock()
     }
 
+    /// Low quality: a rational tanh approximation (Padé 3/2, clamped) in
+    /// place of the exact double-precision tanh — the saturators were the
+    /// most expensive stage. Max error ≈ 2 % near the knee; inaudible as
+    /// a level change, slightly different harmonic balance at high drive.
+    private var lowQuality = false
+    func setLowQuality(_ on: Bool) { lock.lock(); lowQuality = on; lock.unlock() }
+
+    @inline(__always) private static func fastTanh(_ x: Double) -> Double {
+        if x > 3 { return 1 }
+        if x < -3 { return -1 }
+        let x2 = x * x
+        return x * (27 + x2) / (27 + 9 * x2)
+    }
+
     func setDrive(driveDb: Double) {
         lock.lock()
         let d = pow(10, driveDb / 20)
@@ -98,57 +112,72 @@ final class WebAudioSaturator {
 
     func process(_ buffer: UnsafeMutablePointer<Float>, count: Int, channel: Int) {
         lock.lock()
-        let drive = driveLin, post = postGain, biasAmt = biasAmount
+        let drive = driveLin, post = postGain, biasAmt = biasAmount, lq = lowQuality
         lock.unlock()
 
+        // Hot loop: plain local scalars only (no captured closures or nested
+        // arrays — those cost far more than the tanh itself).
         let ch = min(max(channel, 0), 1)
         var pi = pIn[ch], po = pOut[ch]
         let maxMakeup = 1 / post
-        @inline(__always) func makeup(_ x: Double, _ y: Double) -> Double {
-            pi += Self.powerCoef * (x * x - pi)
-            po += Self.powerCoef * (y * y - po)
-            return max(1, min(maxMakeup, ((pi + 1e-12) / (po + 1e-12)).squareRoot()))
-        }
+        let pc = Self.powerCoef
+        // Makeup gain: every sample in high quality, every 32 in low.
+        let makeupEvery = lq ? 32 : 1
+        var g = max(1, min(maxMakeup, ((pi + 1e-12) / (po + 1e-12)).squareRoot()))
 
         if voicing == .odd {
+            let d2 = drive * drive
             for i in 0..<count {
-                let xOrig   = Double(buffer[i])
-                let xScaled = xOrig * drive              // preGain
-                let y       = tanh(xScaled * drive) * post   // unity small-signal gain
-                buffer[i]   = Float(y * makeup(xOrig, y))
+                let x = Double(buffer[i])
+                let u = x * d2
+                let y = (lq ? Self.fastTanh(u) : tanh(u)) * post      // unity small-signal gain
+                pi += pc * (x * x - pi)
+                po += pc * (y * y - po)
+                if i % makeupEvery == 0 {
+                    g = max(1, min(maxMakeup, ((pi + 1e-12) / (po + 1e-12)).squareRoot()))
+                }
+                buffer[i] = Float(y * g)
             }
             pIn[ch] = pi; pOut[ch] = po
             return
         }
 
         var e = env[ch]
-        var st = hpState[ch]
+        let c0 = Self.hpCoefs[0], c1 = Self.hpCoefs[1]
+        var s0 = hpState[ch][0], s1 = hpState[ch][1]
+        var a0 = s0[0], a1 = s0[1], a2 = s0[2], a3 = s0[3]     // stage 1: x1 x2 y1 y2
+        var b0 = s1[0], b1 = s1[1], b2 = s1[2], b3 = s1[3]     // stage 2
+        let d2 = drive * drive
         for i in 0..<count {
-            let xOrig   = Double(buffer[i])
-            let xScaled = xOrig * drive * drive       // preGain + curve drive
+            let x = Double(buffer[i])
+            let xs = x * d2                                       // preGain + curve drive
 
             // Envelope follower (50 ms attack / 400 ms release) → tube-style bias.
-            let mag = abs(xScaled)
+            let mag = abs(xs)
             e += (mag > e ? Self.attackCoef : Self.releaseCoef) * (mag - e)
             let bias = biasAmt * e
 
             // Biased waveshaper, re-centered so silence stays at zero.
-            let shaped = tanh(xScaled + bias) - tanh(bias)
+            let shaped = lq ? Self.fastTanh(xs + bias) - Self.fastTanh(bias)
+                            : tanh(xs + bias) - tanh(bias)
 
             // 4th-order high-pass (removes DC and sub-10 Hz difference tones).
-            var y = shaped
-            for k in 0..<2 {
-                let c = Self.hpCoefs[k]
-                let out = c.b0 * y + c.b1 * st[k][0] + c.b2 * st[k][1] - c.a1 * st[k][2] - c.a2 * st[k][3]
-                st[k][1] = st[k][0]; st[k][0] = y
-                st[k][3] = st[k][2]; st[k][2] = out
-                y = out
-            }
+            let o1 = c0.b0 * shaped + c0.b1 * a0 + c0.b2 * a1 - c0.a1 * a2 - c0.a2 * a3
+            a1 = a0; a0 = shaped; a3 = a2; a2 = o1
+            let o2 = c1.b0 * o1 + c1.b1 * b0 + c1.b2 * b1 - c1.a1 * b2 - c1.a2 * b3
+            b1 = b0; b0 = o1; b3 = b2; b2 = o2
 
-            let yn = y * post                          // unity small-signal gain
-            buffer[i] = Float(yn * makeup(xOrig, yn))
+            let y = o2 * post                                     // unity small-signal gain
+            pi += pc * (x * x - pi)
+            po += pc * (y * y - po)
+            if i % makeupEvery == 0 {
+                g = max(1, min(maxMakeup, ((pi + 1e-12) / (po + 1e-12)).squareRoot()))
+            }
+            buffer[i] = Float(y * g)
         }
-        env[ch] = e; hpState[ch] = st
+        s0 = [a0, a1, a2, a3]; s1 = [b0, b1, b2, b3]
+        env[ch] = e; hpState[ch] = [s0, s1]
         pIn[ch] = pi; pOut[ch] = po
     }
+
 }

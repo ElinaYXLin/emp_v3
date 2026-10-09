@@ -29,6 +29,10 @@ final class Shimmer {
     private let lock = NSLock()
     private var targetStrength: Double = 0
     private var strength: Double = 0
+    private var lowQuality = false
+    private var lowQualityTarget = false
+
+    func setLowQuality(_ on: Bool) { lock.lock(); lowQualityTarget = on; lock.unlock() }
 
     private let shiftBuf = UnsafeMutablePointer<Float>.allocate(capacity: Shimmer.shiftSize)
     private var shiftWrite = 0
@@ -86,6 +90,7 @@ final class Shimmer {
     func process(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>?, count: Int) {
         lock.lock()
         let target = targetStrength
+        lowQuality = lowQualityTarget
         lock.unlock()
         if target == 0 && strength < 1e-5 {                          // fully off: bypass
             if strength != 0 { clear() }                             // don't resurrect an old tail later
@@ -111,7 +116,10 @@ final class Shimmer {
 
             // Octave-down shifter.
             let p1 = shiftPhase, p2 = (shiftPhase + 0.5).truncatingRemainder(dividingBy: 1)
-            let g1 = Float(sin(Double.pi * p1)), g2 = Float(sin(Double.pi * p2))
+            // High: exact sin² crossfade. Low: parabola 4p(1−p) ≈ sin(πp),
+            // skipping two sin() calls per sample.
+            let g1 = lowQuality ? Float(4 * p1 * (1 - p1)) : Float(sin(Double.pi * p1))
+            let g2 = lowQuality ? Float(4 * p2 * (1 - p2)) : Float(sin(Double.pi * p2))
             var y = readShift(4 + p1 * W) * g1 * g1 + readShift(4 + p2 * W) * g2 * g2
             shiftPhase += slope
             if shiftPhase >= 1 { shiftPhase -= 1 }
@@ -127,7 +135,7 @@ final class Shimmer {
             var outs: (Float, Float) = (y, y)
             for ch in 0..<2 {
                 var v = (ch == 0 ? outs.0 : outs.1) + sustain * (ch == 0 ? fbL : fbR)
-                for a in 0..<4 {
+                for a in 0..<(lowQuality ? 2 : 4) {        // low quality: half the diffusion
                     let b = apBufs[ch][a], len = Self.apDelays[ch][a]
                     let idx = apIdx[ch][a]
                     let delayed = b[idx]

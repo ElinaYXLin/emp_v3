@@ -71,8 +71,12 @@ struct ContentView: View {
 
             // Row 2
             HStack(spacing: 8) {
-                presetPicker
-                Divider().frame(height: 22)
+                Group {
+                    presetPicker
+                    Divider().frame(height: 22)
+                    qualityToggle
+                    Divider().frame(height: 22)
+                }
                 dynamicsToggle
                 macroModeToggle
                 if app.macroMode == .vibrato {
@@ -184,6 +188,16 @@ struct ContentView: View {
             .pickerStyle(.menu)
             .frame(width: 250)
         }
+    }
+
+    var qualityToggle: some View {
+        HStack(spacing: 0) {
+            Button("Hi-Q") { app.lowQuality = false }
+                .buttonStyle(EntBtn(active: !app.lowQuality))
+            Button("Lo-Q") { app.lowQuality = true }
+                .buttonStyle(EntBtn(active: app.lowQuality))
+        }
+        .help("Audio quality. Lo-Q uses cheaper versions of the heaviest effects (shorter mono reverb, shorter group delay, approximate saturator curves, lighter shimmer and grain echo) to save CPU/battery.")
     }
 
     var dynamicsToggle: some View {

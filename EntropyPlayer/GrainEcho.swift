@@ -27,6 +27,9 @@ final class GrainEcho {
 
     private let lock = NSLock()
     private var targetStrength: Double = 0
+    private var lowQualityTarget = false
+    private var lowQuality = false                   // audio-thread copy
+    func setLowQuality(_ on: Bool) { lock.lock(); lowQualityTarget = on; lock.unlock() }
 
     // Audio-thread state.
     private let bufL = UnsafeMutablePointer<Float>.allocate(capacity: GrainEcho.bufSize)
@@ -72,6 +75,8 @@ final class GrainEcho {
     }
 
     private func spawnGrain(memory: Double, detune: Double) {
+        // Low quality: at most 6 simultaneous grains (of 12).
+        if lowQuality && voices.lazy.filter(\.active).count >= 6 { return }
         guard let v = voices.firstIndex(where: { !$0.active }) else { return }
         let grainLen = Self.grainLength(memory: memory)
         let cents = (random() * 2 - 1) * detune
@@ -107,6 +112,7 @@ final class GrainEcho {
     func process(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>?, count: Int) {
         lock.lock()
         let target = targetStrength
+        lowQuality = lowQualityTarget
         lock.unlock()
 
         let mask = Self.bufSize - 1

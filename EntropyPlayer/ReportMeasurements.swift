@@ -23,6 +23,7 @@ struct ChainSettings {
     var preampDb = 0.0
     var postGainDb = 0.0        // export only
     var gdRandom = 0.0          // export only
+    var lowQuality = false      // offline chain (benchmarks); export uses high
     var eqDb = 0.0
     var evenDb = 0.0, oddDb = 0.0
     var recipe = SaturatorRecipe.classic

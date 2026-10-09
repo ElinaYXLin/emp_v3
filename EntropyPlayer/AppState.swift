@@ -32,6 +32,13 @@ final class AppState: ObservableObject {
     @Published var ranges: [String: RangeValue]  = ["reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init()]
     @Published var waveColor: Color = Color(hex: "#35d6d0")
     @Published var satRecipe: String = SaturatorRecipe.classic.name
+    /// Audio quality mode (persisted). Low = cheaper versions of the heaviest effects.
+    @Published var lowQuality: Bool = UserDefaults.standard.bool(forKey: "quality.low") {
+        didSet {
+            UserDefaults.standard.set(lowQuality, forKey: "quality.low")
+            audio.setLowQuality(lowQuality)
+        }
+    }
     @Published var isExporting = false
     @Published var exportStatus: String? = nil
     @Published var selectedPreset: String = GlobalPreset.initName
@@ -93,6 +100,7 @@ final class AppState: ObservableObject {
         inputDevices  = audio.listInputDevices()
         outputDevices = audio.listOutputDevices()
         selectedInputDeviceID  = inputDevices.first?.id
+        audio.setLowQuality(lowQuality)
         selectedOutputDeviceID = preferredOutputDevice()
         audio.setPlaybackOutputDevice(selectedOutputDeviceID)
     }

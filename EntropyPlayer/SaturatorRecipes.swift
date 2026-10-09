@@ -180,6 +180,9 @@ final class RecipeStage {
     }()
     private var hpS = [[Double]](repeating: [0, 0, 0, 0], count: 2)
 
+    private var lowQuality = false
+    func setLowQuality(_ on: Bool) { lock.lock(); lowQuality = on; lock.unlock() }
+
     /// amount 0…1: how hard the saturator knobs are driven (scales the harmonic recipe).
     func configure(_ r: SaturatorRecipe, amount: Double) {
         preLow.setGain(db: r.preLowDb);   deLow.setGain(db: -r.preLowDb)
@@ -198,12 +201,14 @@ final class RecipeStage {
     }
 
     func post(_ buf: UnsafeMutablePointer<Float>, count: Int, channel ch: Int) {
-        lock.lock(); let w = h; let m = mix; lock.unlock()
+        lock.lock(); let w = h; let m = mix; let lq = lowQuality; lock.unlock()
         if m > 1e-6 {
             var st = hpS[ch]
             for i in 0..<count {
                 let x = Double(buf[i])
-                let u = tanh(x)                                 // bounded for the polynomials
+                // Bounded for the polynomials (Padé approximation in low quality).
+                let u: Double
+                if lq { u = x > 3 ? 1 : (x < -3 ? -1 : x * (27 + x * x) / (27 + 9 * x * x)) } else { u = tanh(x) }
                 let u2 = u * u
                 let t2 = 2 * u2 - 1, t3 = (4 * u2 - 3) * u
                 let t4 = 8 * u2 * u2 - 8 * u2 + 1, t5 = (16 * u2 * u2 - 20 * u2 + 5) * u

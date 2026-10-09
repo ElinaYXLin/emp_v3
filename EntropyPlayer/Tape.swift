@@ -49,6 +49,7 @@ final class TapeHysteresis {
         if t == 0 && strength < 1e-5 { strength = 0; return }
         let glide = 1 - exp(-1 / (0.05 * Self.sr))
         var p = play[ch], e = env[ch], l = lp[ch], st = hpS[ch]
+        let lpCoef = 1 - exp(-2 * Double.pi * (20000 - 11000 * strength) / Self.sr)
         for i in 0..<count {
             if ch == 0 { strength += (t - strength) * glide }
             let s = strength
@@ -71,9 +72,9 @@ final class TapeHysteresis {
             let o = hp.b0 * y + hp.b1 * st[0] + hp.b2 * st[1] - hp.a1 * st[2] - hp.a2 * st[3]
             st[1] = st[0]; st[0] = y; st[3] = st[2]; st[2] = o
             y = o
-            // Top-end loss: one-pole low-pass 20 kHz → 9 kHz with strength.
-            let fc = 20000 - 11000 * s
-            l += (1 - exp(-2 * Double.pi * fc / Self.sr)) * (y - l)
+            // Top-end loss: one-pole low-pass 20 kHz → 9 kHz with strength
+            // (coefficient computed once per block; strength glides slowly).
+            l += lpCoef * (y - l)
             // Blend so strength 0 is exactly dry.
             buf[i] = Float(x + (l - x) * min(1, s * 4))
         }

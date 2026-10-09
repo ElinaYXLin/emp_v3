@@ -62,8 +62,12 @@ final class PartitionedConvolver {
     private let fdlIm: [UnsafeMutablePointer<Float>]
     private let accRe, accIm, time, prevOut: UnsafeMutablePointer<Float>
 
-    init(maxPartitions: Int, identityDelay: Int?) {
+    /// 1 = mono (only the left/first buffer is processed; half the work).
+    let channels: Int
+
+    init(maxPartitions: Int, identityDelay: Int?, channels: Int = 2) {
         self.maxPartitions = maxPartitions
+        self.channels = channels
         self.identityDelay = identityDelay
         fftSetup = vDSP_create_fftsetup(Self.log2N, FFTRadix(kFFTRadix2))!
         func buf(_ n: Int) -> UnsafeMutablePointer<Float> {
@@ -155,7 +159,7 @@ final class PartitionedConvolver {
         let oldFilter = active
         fdlPos = (fdlPos + 1) % maxPartitions
 
-        for ch in 0..<2 {
+        for ch in 0..<channels {
             var x = DSPSplitComplex(realp: fdlRe[ch] + fdlPos * Self.bins,
                                     imagp: fdlIm[ch] + fdlPos * Self.bins)
             inBlock[ch].withMemoryRebound(to: DSPComplex.self, capacity: Self.bins) {

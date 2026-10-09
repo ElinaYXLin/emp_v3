@@ -104,7 +104,7 @@ final class SpectralBlur {
             let releaseSec = 0.10 + strength * 2.40
             let aAtk = Float(1 - exp(-1 / (attackSec * Self.frameRate)))
             let aRel = Float(1 - exp(-1 / (releaseSec * Self.frameRate)))
-            let sm = smooth[ch], ph = phase[ch]
+            let sm = smooth[ch]
             // Bin 0 packs DC and Nyquist — left untouched.
             for k in 1..<B {
                 let x = re[k], y = im[k]
@@ -116,7 +116,6 @@ final class SpectralBlur {
                 if m > 1e-9 {
                     let g = out / m
                     re[k] = x * g; im[k] = y * g
-                    ph[k] = atan2f(y, x)
                 } else {
                     // Only the lingering tail remains (true silence): give it a
                     // fresh random phase each frame so it dissolves into a soft

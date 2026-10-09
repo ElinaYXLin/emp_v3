@@ -99,6 +99,22 @@ final class GroupDelay {
     }
 
     /// randomness: max deviation as a fraction of the scale (0…0.5).
+    // Low quality: a ¼-length filter (2^15 taps), so max delay is capped at
+    // 0.55 s instead of 1.6 s; ¼ of the convolution work and 4× cheaper
+    // redesigns while drifting. Touched only on paramQueue.
+    private var lowQuality = false
+    private static let lowTaps = 1 << 15
+    private static let lowMaxDelaySec = 0.55
+
+    func setLowQuality(_ on: Bool) {
+        paramQueue.async { [weak self] in
+            guard let self, self.lowQuality != on else { return }
+            self.lowQuality = on
+            self.currentScale = -1                      // force a redesign
+            self.applyModulated()
+        }
+    }
+
     func setRandomness(_ r: Double) {
         paramQueue.async { [weak self] in
             guard let self else { return }
@@ -161,13 +177,15 @@ final class GroupDelay {
     }
 
     /// Delay in seconds at frequency f.
-    private static func tau(_ f: Double, scale: Double) -> Double {
+    private static func tau(_ f: Double, scale: Double, maxDelay: Double) -> Double {
         let base = scale / max(f, floorHz)
-        return min(maxDelaySec, base * (1 + smearAmount * smear(f)))
+        return min(maxDelay, base * (1 + smearAmount * smear(f)))
     }
 
     private func design(scale: Double, sampleRate sr: Double) -> [Float] {
-        let n = Self.taps
+        let n = lowQuality ? Self.lowTaps : Self.taps
+        let fadeTaps = lowQuality ? 2048 : Self.fadeTaps
+        let maxDelay = lowQuality ? Self.lowMaxDelaySec : Self.maxDelaySec
         let df = sr / Double(n)
         let bulkSec = Double(Self.bulkDelay) / sr
 
@@ -178,7 +196,7 @@ final class GroupDelay {
         re[0] = 1
         for k in 1...(n / 2) {
             let fMid = (Double(k) - 0.5) * df
-            phi -= 2 * Double.pi * (Self.tau(fMid, scale: scale) + bulkSec) * df
+            phi -= 2 * Double.pi * (Self.tau(fMid, scale: scale, maxDelay: maxDelay) + bulkSec) * df
             if k == n / 2 {
                 re[k] = Float(cos(phi))          // Nyquist bin must be real
             } else {
@@ -195,9 +213,9 @@ final class GroupDelay {
         }
         var norm = 1 / Float(n)                  // inverse DFT normalization
         vDSP_vsmul(h, 1, &norm, &h, 1, vDSP_Length(n))
-        for i in 0..<Self.fadeTaps {
-            let w = 0.5 * (1 + cos(Double.pi * Double(i + 1) / Double(Self.fadeTaps)))
-            h[n - Self.fadeTaps + i] *= Float(w)
+        for i in 0..<fadeTaps {
+            let w = 0.5 * (1 + cos(Double.pi * Double(i + 1) / Double(fadeTaps)))
+            h[n - fadeTaps + i] *= Float(w)
         }
 
         return h

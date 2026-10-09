@@ -49,6 +49,10 @@ final class OfflineChain {
         } else {
             dyn.configure(thresholdDb: 0, kneeDb: 0, ratio: 20, attackSec: 0.001, releaseSec: 0.1, trimDb: -6)
         }
+        if s.lowQuality {
+            rv.setLowQuality(true); gd.setLowQuality(true); gd.flushParameters()
+            ev.setLowQuality(true); od.setLowQuality(true); rs.setLowQuality(true); sh.setLowQuality(true); gr.setLowQuality(true)
+        }
         ceiling.setSampleRate(Self.sampleRate)
         ceiling.configure(thresholdDb: 0, kneeDb: 0, ratio: 20, attackSec: 0.0005, releaseSec: 0.05, trimDb: 0)
         inGain = Float(pow(10, (s.fileTrimDb + s.preampDb) / 20))

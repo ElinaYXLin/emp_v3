@@ -536,6 +536,18 @@ final class AudioEngine {
         recipeStage.configure(recipe, amount: Double(evenDriveDb + oddDriveDb) / 16)
     }
 
+    /// Quality mode: low swaps the heaviest effects for cheaper versions
+    /// (see each effect's setLowQuality for what changes).
+    func setLowQuality(_ on: Bool) {
+        reverbFilter.setLowQuality(on)
+        groupDelay.setLowQuality(on)
+        satFilter.setLowQuality(on)
+        recipeStage.setLowQuality(on)
+        oddSatFilter.setLowQuality(on)
+        shimmer.setLowQuality(on)
+        grainEcho.setLowQuality(on)
+    }
+
     /// Tape hysteresis: effective 0–1 (drive, loop width, head bump, top-end loss).
     func setTapeHysteresis(effective eff: Float) {
         tapeHyst.setStrength(Double(eff))
