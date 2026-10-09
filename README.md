@@ -46,7 +46,7 @@ Other controls:
 - **Limiter / Compressor**: the final dynamics stage, with an always-on safety ceiling after it.
 - **Presets**: 40 global presets grouped by vibe (Nostalgic, Calming, Inspiring, Dreamy, Playful), plus **INIT**, the defaults.
 - **Save / Load Settings**: store your knobs, ranges and recipe as JSON.
-- **Color** picker: the waveform color, also used by the Listener Report.
+- **Color** picker: the accent color used by the Listener Report.
 
 ### Effects
 
@@ -74,16 +74,23 @@ Signal flow: **Spectral Haze → Temporal Haze → Color → dynamics → output
 | Shimmer | Octave-down feedback glow under the music |
 | Grain Echo | Short detuned grains replayed from the last ≤200 ms, like music echoing from memory |
 
-**Bottom zone**
+**Recipes and Tape** (Saturator Recipes on the Effects page; Hysteresis and Tape Sag on Emulation › Tape)
 | Control | What it does |
 |---|---|
 | Saturator Recipes | 20 characters (Sweeten, Thicken, Vintagize, Glow, Velvet… and nostalgic ones like Grandma's Kitchen or Faded Polaroid) that reshape the saturators with emphasis EQ, tube bias and exact harmonic recipes |
 | Hysteresis | Tape magnetic "memory": rounded, slightly compressed response with a head bump |
 | Tape Sag | Loud passages make the tape dip in level, dull and briefly droop in pitch |
 
+**Tube Amp** (Emulation page)
+| Knob | What it does |
+|---|---|
+| Fuzz | Transformer saturation on magnetic flux, so low notes fuzz far more than high ones (40 Hz much more than 200 Hz); the fuzz alone is low-passed like a speaker cabinet (5 → 3.5 kHz) to stay round and woolly |
+| Bloom | Each bass hit briefly dips the level, then it blooms back over 100–300 ms (stronger and slower as the knob rises); the mids take a quarter of the dip, so the amp breathes with the kick |
+| Fur | After loud bass the fuzz bias drifts, so decays crackle softly; higher is louder and more frequent |
+
 ### Listener Report
 
-**Listener Report** saves a shareable PNG card in your waveform's colors. It includes:
+**Listener Report** saves a shareable PNG card in your chosen color. It includes:
 
 - **Score:** total harmonic distortion at 100 Hz and 1 kHz, measured through your current Color chain.
 - **More measurements:** THD+N, 5-tone intermodulation, and time smear (clarity C50 and centre time).
@@ -116,6 +123,7 @@ EntropyPlayer/
   CustomSaturator.swift      even/odd saturators
   SaturatorRecipes.swift     recipe definitions and shaping stage
   Tape.swift                 tape hysteresis and sag
+  TubeAmp.swift              transformer fuzz, bass bloom, bias-shift fur
   CustomEQ.swift             lo-mid bell, high roll-off, subsonic filter
   CustomDynamics.swift       limiter/compressor
   Presets.swift              global presets

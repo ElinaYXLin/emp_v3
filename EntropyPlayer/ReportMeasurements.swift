@@ -28,6 +28,7 @@ struct ChainSettings {
     var evenDb = 0.0, oddDb = 0.0
     var recipe = SaturatorRecipe.classic
     var hysteresis = 0.0, sag = 0.0
+    var fuzz = 0.0, bloom = 0.0, fur = 0.0
     var rolloff = 0.0
     var compressor = false
     // Haze
@@ -62,6 +63,7 @@ enum ReportMeasurer {
         let od = WebAudioSaturator(voicing: .odd); od.setDrive(driveDb: min(24, s.oddDb * s.recipe.oddMul))
         let th = TapeHysteresis(); th.setStrength(s.hysteresis)
         let sg = TapeSag(); sg.setStrength(s.sag)
+        let ta = TubeAmp(); ta.setFuzz(s.fuzz); ta.setBloom(s.bloom); ta.setFur(s.fur)
         let ro = HighRolloff(); ro.setSlope(dbPerOctave: s.rolloff)
         let dyn = WebAudioCompressor(); dyn.setSampleRate(sr)
         if s.compressor {
@@ -85,6 +87,7 @@ enum ReportMeasurer {
                 rs.post(q, count: c, channel: 0)
                 th.process(q, count: c, channel: 0)
                 sg.process(left: q, right: nil, count: c)
+                ta.process(left: q, right: nil, count: c)
                 for j in 0..<c { q[j] /= fixedDrive }     // fixed +7 dB is undone after the saturation stage
                 ro.process(q, count: c, channel: 0)
                 dyn.process(left: q, right: nil, count: c)

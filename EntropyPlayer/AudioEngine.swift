@@ -39,7 +39,7 @@ final class AudioEngine {
     // re-enters through dspSourceNode, whose render callback runs the whole
     // chain inline:
     //   group delay → spectral blur → grain echo → reverb → shimmer → EQ → +7 dB → 25 Hz high-pass → even sat → odd sat → high roll-off
-    //   (with recipe shaping around the saturators) → tape hysteresis → tape sag
+    //   (with recipe shaping around the saturators) → tape hysteresis → tape sag → tube amp
 //   → high roll-off → limiter/compressor → post-gain → output ceiling
     //
     // This used to be four chained tap→ring→source-node bridges, one per
@@ -91,6 +91,7 @@ final class AudioEngine {
     private let recipeStage   = RecipeStage()
     private let tapeHyst      = TapeHysteresis()
     private let tapeSag       = TapeSag()
+    private let tubeAmp       = TubeAmp()
     private var evenDriveDb: Float = 0, oddDriveDb: Float = 0
     private var recipe = SaturatorRecipe.classic
 
@@ -380,6 +381,7 @@ final class AudioEngine {
             tapeHyst.process(buf, count: n, channel: ch)
         }
         tapeSag.process(left: l, right: r, count: n)
+        tubeAmp.process(left: l, right: r, count: n)
         var gInv = 1 / preLimiterGainLinear
         vDSP_vsmul(l, 1, &gInv, l, 1, vDSP_Length(n))
         vDSP_vsmul(r, 1, &gInv, r, 1, vDSP_Length(n))
@@ -556,6 +558,11 @@ final class AudioEngine {
     /// Tape sag: effective 0–1 (level dip, dulling, pitch droop on loud passages).
     func setTapeSag(effective eff: Float) {
         tapeSag.setStrength(Double(eff))
+    }
+
+    /// Tube amp: effective 0–1 each for Fuzz, Bloom and Fur (see TubeAmp.swift).
+    func setTubeAmp(fuzz: Float, bloom: Float, fur: Float) {
+        tubeAmp.setFuzz(Double(fuzz)); tubeAmp.setBloom(Double(bloom)); tubeAmp.setFur(Double(fur))
     }
 
     /// High roll-off: 0–6 dB/octave slope above 1 kHz.

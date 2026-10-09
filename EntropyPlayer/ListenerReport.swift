@@ -45,7 +45,7 @@ extension AppState {
     }
 
     func effective(_ key: String, atMacro m: Double) -> Double {
-        var s = (sensitivity[key] ?? 50) / 100
+        var s = (sensitivity[key] ?? AppSettings.defaultSensitivity(key)) / 100
         if key == "reverb" { s *= s }             // quadratic knob, as in AppState.effective
         let r = ranges[key] ?? RangeValue()
         return (r.min + (r.max - r.min) * (m / 100)) / 100 * s
@@ -75,11 +75,12 @@ extension AppState {
         let recipe     = SaturatorRecipe.named(satRecipe)
         let hyst       = eff("hyst")
         let sag        = eff("sag")
+        let fuzz = eff("fuzz"), bloom = eff("bloom"), fur = eff("fur")
         let shimRT     = shimmer > 0 ? 0.095 * 3 / -log10(0.40 + 0.50 * shimmer) : 0   // loop trip / dB per trip → RT60
 
         var cs = ChainSettings()
         cs.preampDb = preampDb; cs.eqDb = eqDb; cs.evenDb = evenDb; cs.oddDb = oddDb
-        cs.recipe = recipe; cs.hysteresis = hyst; cs.sag = sag; cs.rolloff = rollSlope
+        cs.recipe = recipe; cs.hysteresis = hyst; cs.sag = sag; cs.fuzz = fuzz; cs.bloom = bloom; cs.fur = fur; cs.rolloff = rollSlope
         cs.compressor = dynamicsMode == .compressor
         cs.gdScale = gdScale; cs.blur = blur; cs.grain = grain
         cs.reverbDecaySec = decaySec; cs.shimmer = shimmer
@@ -105,6 +106,15 @@ extension AppState {
                       : "off"),
                 .init(label: "Tape sag",       value: sag > 0.001
                       ? String(format: "%.0f%%: up to −%.1f dB dip, top → %.0f kHz, %.1f ms motor droop", sag * 100, -20 * log10(1 - 0.5 * sag), (18000 - 12000 * sag) / 1000, 4 * sag)
+                      : "off"),
+                .init(label: "Tube fuzz",      value: fuzz > 0.001
+                      ? String(format: "%.0f%%: transformer flux drive %.1f×, ~5× heavier @ 40 Hz than 200 Hz, cab LP %.1f kHz", fuzz * 100, 3 * pow(fuzz, 1.3), (5000 - 1500 * fuzz) / 1000)
+                      : "off"),
+                .init(label: "Tube bloom",     value: bloom > 0.001
+                      ? String(format: "%.0f%%: bass-driven dip, %.0f ms recovery, mids take ¼", bloom * 100, 100 + 200 * bloom)
+                      : "off"),
+                .init(label: "Tube fur",       value: fur > 0.001
+                      ? String(format: "%.0f%%: bias shift after loud bass, up to ~%.0f soft crackles/s", fur * 100, 0.5 + 40 * fur * fur)
                       : "off"),
                 .init(label: "Subsonic cut",   value: "12 dB/oct below 25 Hz"),
             ]),

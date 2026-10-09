@@ -12,11 +12,16 @@ struct AppSettings: Codable {
     var macro:        Double = 0
     var sensitivity:  [String: Double] = GlobalPreset.initPreset.sensitivity
     var ranges:       [String: RangeValue] = [
-        "reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init()
+        "reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init()
     ]
     var recipe:       String? = nil      // optional: older files predate recipes
     var order:        String = "alpha"
     var dynamics:     String = "limiter"
+
+    /// Knobs added after older settings files/presets were written start at 0.
+    static func defaultSensitivity(_ key: String) -> Double {
+        ["fuzz", "bloom", "fur"].contains(key) ? 0 : 50
+    }
 }
 
 // MARK: - AppState
@@ -29,7 +34,7 @@ final class AppState: ObservableObject {
     @Published var preampDb: Double = 0           // -12…0
     @Published var postGainDb: Double = 0         // -24…24, final output volume trim/boost
     @Published var sensitivity: [String: Double] = GlobalPreset.initPreset.sensitivity
-    @Published var ranges: [String: RangeValue]  = ["reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init()]
+    @Published var ranges: [String: RangeValue]  = ["reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init()]
     @Published var waveColor: Color = Color(hex: "#35d6d0")
     @Published var satRecipe: String = SaturatorRecipe.classic.name
     /// Audio quality mode (persisted). Low = cheaper versions of the heaviest effects.
@@ -183,7 +188,7 @@ final class AppState: ObservableObject {
     // MARK: - Effective level computation
     // effective = lerp(range.min, range.max, macro) * sensitivity → 0…1
     func effective(_ key: String) -> Float {
-        var s = Float(sensitivity[key] ?? 50) / 100
+        var s = Float(sensitivity[key] ?? AppSettings.defaultSensitivity(key)) / 100
         // Reverb is very strong, so its knob is quadratic: 40% acts like the
         // old linear 16%, 60% like 36%.
         if key == "reverb" { s *= s }
@@ -202,6 +207,7 @@ final class AppState: ObservableObject {
         audio.setShimmer(effective: effective("shimmer"))
         audio.setTapeHysteresis(effective: effective("hyst"))
         audio.setTapeSag(effective: effective("sag"))
+        audio.setTubeAmp(fuzz: effective("fuzz"), bloom: effective("bloom"), fur: effective("fur"))
         audio.setSaturatorRecipe(SaturatorRecipe.named(satRecipe))
         audio.setEQ(gainDb: effective("eq") * 12)
         audio.setSaturator(driveDb: effective("sat") * 16)

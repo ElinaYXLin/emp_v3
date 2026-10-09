@@ -305,9 +305,16 @@ struct ContentView: View {
             } else {
                 Spacer(minLength: 0)
                 VStack(alignment: .leading, spacing: 8) {
-                    pageTabs
+                    HStack {
+                        pageTabs
+                        Spacer()
+                        let other: Page = page == .effects ? .emulation : .effects
+                        Button(page == .effects ? "\(other.rawValue) →" : "← \(other.rawValue)") { page = other }
+                            .buttonStyle(EntBtn(active: false))
+                    }
                     if page == .effects { effectsPage } else { emulationPage }
                 }
+                .frame(width: Self.pageWidth)
             }
             Spacer(minLength: 0)
             macroSliderPanel
@@ -435,7 +442,14 @@ struct ContentView: View {
                     knobRow(key: "sag",  label: "Tape Sag",   sub: "Motor strain",
                             display: { "\(Int($0))%" })
                 }
-                knobGroup("Tube Amp") { comingSoon("Loose, fuzzy tube-amp bass: speaker overhang, transformer fuzz, supply bloom.") }
+                knobGroup("Tube Amp") {
+                    knobRow(key: "fuzz",  label: "Fuzz",  sub: "Transformer",
+                            display: { "\(Int($0))%" })
+                    knobRow(key: "bloom", label: "Bloom", sub: "Bass sag",
+                            display: { "\(Int($0))%" })
+                    knobRow(key: "fur",   label: "Fur",   sub: "Bias crackle",
+                            display: { "\(Int($0))%" })
+                }
             }
         }
     }
@@ -467,7 +481,7 @@ struct ContentView: View {
     @ViewBuilder
     func knobRow(key: String, label: String, sub: String, display: @escaping (Double) -> String) -> some View {
         let sensitivity = Binding(
-            get: { app.sensitivity[key] ?? 50 },
+            get: { app.sensitivity[key] ?? AppSettings.defaultSensitivity(key) },
             set: { app.sensitivity[key] = $0; app.applyAllDSP() })
         let rangeMin = Binding(
             get: { app.ranges[key]?.min ?? 0 },

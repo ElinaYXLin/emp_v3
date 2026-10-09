@@ -29,7 +29,7 @@ final class OfflineChain {
     private let rv = ConvolutionReverb(), sh = Shimmer()
     private let eq = PeakingBiquad(), ss = SubsonicFilter(), rs = RecipeStage()
     private let ev = WebAudioSaturator(voicing: .even), od = WebAudioSaturator(voicing: .odd)
-    private let th = TapeHysteresis(), sg = TapeSag(), ro = HighRolloff()
+    private let th = TapeHysteresis(), sg = TapeSag(), ta = TubeAmp(), ro = HighRolloff()
     private let dyn = WebAudioCompressor(), ceiling = WebAudioCompressor()
     private let inGain: Float, fixedDrive: Float, postGain: Float
 
@@ -43,6 +43,7 @@ final class OfflineChain {
         ev.setDrive(driveDb: min(24, s.evenDb * s.recipe.evenMul)); ev.setBias(s.recipe.bias)
         od.setDrive(driveDb: min(24, s.oddDb * s.recipe.oddMul))
         th.setStrength(s.hysteresis); sg.setStrength(s.sag); ro.setSlope(dbPerOctave: s.rolloff)
+        ta.setFuzz(s.fuzz); ta.setBloom(s.bloom); ta.setFur(s.fur)
         dyn.setSampleRate(Self.sampleRate)
         if s.compressor {
             dyn.configure(thresholdDb: -18, kneeDb: 12, ratio: 4, attackSec: 0.01, releaseSec: 0.25, trimDb: -12)
@@ -83,6 +84,7 @@ final class OfflineChain {
                 th.process(q, count: n, channel: ch)
             }
             sg.process(left: a, right: b, count: n)
+            ta.process(left: a, right: b, count: n)
             for i in 0..<n { a[i] /= fixedDrive; b[i] /= fixedDrive }
             ro.process(a, count: n, channel: 0); ro.process(b, count: n, channel: 1)
             dyn.process(left: a, right: b, count: n)
@@ -197,6 +199,7 @@ extension AppState {
         cs.oddDb = eff("oddsat") * 16
         cs.recipe = SaturatorRecipe.named(satRecipe)
         cs.hysteresis = eff("hyst"); cs.sag = eff("sag")
+        cs.fuzz = eff("fuzz"); cs.bloom = eff("bloom"); cs.fur = eff("fur")
         cs.rolloff = eff("rolloff") * 6
         cs.compressor = dynamicsMode == .compressor
         cs.gdScale = eff("gd") * 20
