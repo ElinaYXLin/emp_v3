@@ -75,6 +75,9 @@ final class AudioEngine {
     private let grainEcho        = GrainEcho()
     private let choir            = Choir()
     private let depth            = Depth()
+    private let glowGlue         = GlowGlue()
+    private let grit             = Grit()
+    private let melodyBlur       = MelodyBlur()
     private let bandEQ           = FourBandEQ()
     private let postTube         = PostTubeSaturator()
     // Spectral haze: per-frequency level slew (see SpectralBlur.swift).
@@ -373,6 +376,8 @@ final class AudioEngine {
         // it smears their tails too). The rest of Emulation (tape, tube amp)
         // follows.
         choir.process(left: l, right: r, count: n)
+        // Blur section first (smear, wash, soften, distance), before the Effects page.
+        melodyBlur.process(left: l, right: r, count: n)
 
         eqFilter.process(l, count: n, channel: 0)
         eqFilter.process(r, count: n, channel: 1)
@@ -400,6 +405,7 @@ final class AudioEngine {
         grainEcho.process(left: l, right: r, count: n)
         shimmer.process(left: l, right: r, count: n)
         depth.process(left: l, right: r, count: n)
+        glowGlue.process(left: l, right: r, count: n)
         reverbFilter.process(left: l, right: r, count: n)
 
         // Spectral haze (after the temporal haze, so it smears the tails too).
@@ -420,6 +426,7 @@ final class AudioEngine {
         vDSP_vsmul(l, 1, &gInv, l, 1, vDSP_Length(n))
         vDSP_vsmul(r, 1, &gInv, r, 1, vDSP_Length(n))
 
+        grit.process(left: l, right: r, count: n)
         bandEQ.process(l, count: n, channel: 0); bandEQ.process(r, count: n, channel: 1)
         postTube.process(left: l, right: r, count: n)
         finalSub1.process(l, count: n, channel: 0); finalSub1.process(r, count: n, channel: 1)
@@ -607,6 +614,16 @@ final class AudioEngine {
 
     /// Depth (undertones): effective 0–1 (see Depth.swift).
     func setDepth(effective eff: Float) { depth.setAmount(Double(eff)) }
+    /// Blur section: effective 0–1 each.
+    func setMelodyBlur(smear: Float, wash: Float, soften: Float, distance: Float, swell: Float, diffuse: Float) {
+        melodyBlur.set(smear: Double(smear), wash: Double(wash), soften: Double(soften), distance: Double(distance), swell: Double(swell), diffuse: Double(diffuse))
+    }
+    /// Grit row: bit depth, soft clip, grain noise (effective 0–1 each).
+    func setGrit(bits: Float, softClip: Float, noise: Float, corpus: Float, rattle: Float) {
+        grit.set(bits: Double(bits), softClip: Double(softClip), noise: Double(noise), corpus: Double(corpus), rattle: Double(rattle))
+    }
+    /// Shared glue saturation for dry + glow (follows the stronger of Shimmer/Depth).
+    func setGlowGlue(_ a: Double) { glowGlue.setAmount(a) }
     /// Four-band EQ gains in dB: low, mid, high-mid, high.
     func setBandEQ(db: [Double]) { bandEQ.setGains(db: db) }
     /// Post tube saturator (under the EQ): amount 0–1, voiced by the selected recipe.

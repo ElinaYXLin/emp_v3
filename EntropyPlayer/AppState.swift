@@ -12,7 +12,7 @@ struct AppSettings: Codable {
     var macro:        Double = 0
     var sensitivity:  [String: Double] = AppSettings.defaultSensitivities
     var ranges:       [String: RangeValue] = [
-        "reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "depth": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init()
+        "reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "depth": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init(), "bits": .init(), "softclip": .init(), "gnoise": .init(), "bsmear": .init(), "bwash": .init(), "bsoften": .init(), "bdist": .init(), "corpus": .init(), "rattle": .init(), "bswell": .init(), "bdiffuse": .init()
     ]
     var recipe:       String? = nil      // optional: older files predate recipes
     var order:        String = "alpha"
@@ -20,11 +20,12 @@ struct AppSettings: Codable {
 
     /// INIT FX preset + Off emulation preset.
     static let defaultSensitivities = GlobalPreset.initPreset.sensitivity
+        .filter { $0.key != GlobalPreset.postTubeKey }
         .merging(EmulationPreset.off.sensitivity) { a, _ in a }
 
     /// Knobs added after older settings files/presets were written start at 0.
     static func defaultSensitivity(_ key: String) -> Double {
-        ["depth", "fuzz", "bloom", "fur", "voices", "detune", "cdelay", "cvib", "wobble", "wow", "erase"].contains(key) ? 0 : 50
+        ["depth", "fuzz", "bloom", "fur", "voices", "detune", "cdelay", "cvib", "wobble", "wow", "erase", "bits", "softclip", "gnoise", "bsmear", "bwash", "bsoften", "bdist", "corpus", "rattle", "bswell", "bdiffuse"].contains(key) ? 0 : 50
     }
 }
 
@@ -38,7 +39,7 @@ final class AppState: ObservableObject {
     @Published var preampDb: Double = 0           // -12…0
     @Published var postGainDb: Double = 0         // -24…48, final output volume trim/boost
     @Published var sensitivity: [String: Double] = AppSettings.defaultSensitivities
-    @Published var ranges: [String: RangeValue]  = ["reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "depth": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init()]
+    @Published var ranges: [String: RangeValue]  = ["reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "depth": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init(), "bits": .init(), "softclip": .init(), "gnoise": .init(), "bsmear": .init(), "bwash": .init(), "bsoften": .init(), "bdist": .init(), "corpus": .init(), "rattle": .init(), "bswell": .init(), "bdiffuse": .init()]
     @Published var waveColor: Color = Color(hex: "#35d6d0")
     @Published var satRecipe: String = SaturatorRecipe.classic.name
     /// Audio quality mode (persisted). Low = cheaper versions of the heaviest effects.
@@ -60,9 +61,11 @@ final class AppState: ObservableObject {
         didSet {
             UserDefaults.standard.set(lowQuality, forKey: "quality.low")
             audio.setLowQuality(lowQuality)
-        audio.setBandEQ(db: bandEQ)
         }
     }
+    var lastSessionData: Data?
+    var sessionPostGainRaw: Double?
+    var sessionAutosave: AnyCancellable?
     @Published var isExporting = false
     @Published var exportStatus: String? = nil
     @Published var selectedPreset: String = GlobalPreset.initName
@@ -123,6 +126,14 @@ final class AppState: ObservableObject {
         audio.setLowQuality(lowQuality)
         selectedOutputDeviceID = preferredOutputDevice()
         audio.setPlaybackOutputDevice(selectedOutputDeviceID)
+        audio.setBandEQ(db: bandEQ)
+        audio.setPostTube(amount: postTube / 100, recipe: SaturatorRecipe.named(satRecipe))
+
+        // Come back exactly as the user left it (Post-Gain 6 dB lower), then
+        // keep the saved session up to date.
+        restoreSession()
+        lastSessionData = try? JSONEncoder().encode(currentSession())
+        sessionAutosave = startSessionAutosave()
     }
 
     // MARK: - System capture
@@ -225,7 +236,13 @@ final class AppState: ObservableObject {
         audio.setGrainEcho(effective: effective("grain"))
         audio.setDepth(effective: effective("depth"))
         audio.setChoir(voices: effective("voices"), detune: effective("detune"), delay: effective("cdelay"), vibrato: effective("cvib"))
-        audio.setSpectralBlur(effective: effective("blur"))
+        // Shimmer/Depth cohesion: a little shared spectral blur and glue
+        // whenever either is on, so the glow fuses with the music.
+        let glow = max(effective("shimmer"), effective("depth"))
+        audio.setSpectralBlur(effective: max(effective("blur"), 0.3 * glow))
+        audio.setGlowGlue(Double(glow))
+        audio.setMelodyBlur(smear: effective("bsmear"), wash: effective("bwash"), soften: effective("bsoften"), distance: effective("bdist"), swell: effective("bswell"), diffuse: effective("bdiffuse"))
+        audio.setGrit(bits: effective("bits"), softClip: effective("softclip"), noise: effective("gnoise"), corpus: effective("corpus"), rattle: effective("rattle"))
         audio.setShimmer(effective: effective("shimmer"))
         audio.setTapeHysteresis(effective: effective("hyst"))
         audio.setTapeSag(effective: effective("sag"))
@@ -347,8 +364,11 @@ final class AppState: ObservableObject {
         selectedPreset = p.name
         // FX knobs only; the Emulation page keeps its settings.
         let defaults = AppSettings().ranges
-        for (k, v) in p.sensitivity { sensitivity[k] = v; ranges[k] = defaults[k] ?? .init() }
+        for (k, v) in p.sensitivity where k != GlobalPreset.postTubeKey {
+            sensitivity[k] = v; ranges[k] = defaults[k] ?? .init()
+        }
         satRecipe = p.recipe
+        postTube = p.sensitivity[GlobalPreset.postTubeKey] ?? 0
         if macroMode != .manual { setMacroMode(.manual) }
         setMacro(p.macro)
     }

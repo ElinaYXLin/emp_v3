@@ -32,6 +32,16 @@ struct ContentView: View {
     static let bandEQWidth: CGFloat = 140
     /// Window content width at which both pages fit side by side.
     static let bothPagesWidth: CGFloat = sidePanelsWidth + pageWidth * 2 + 14 * 4 + 28
+    /// Below this width not even one full page fits: switch to mini mode.
+    static let onePageWidth: CGFloat = sidePanelsWidth + pageWidth + 14 * 3 + 28
+
+    // Mini mode: no range sliders, narrow columns, essentials only.
+    @State private var mini = false
+    static let miniColumnWidth: CGFloat = 76
+    static let miniColumnGap: CGFloat = 8
+    static let miniPageWidth: CGFloat = miniColumnWidth * 3 + miniColumnGap * 2 + 20
+    var columnWidth: CGFloat { mini ? Self.miniColumnWidth : Self.columnWidth }
+    var pageWidth: CGFloat { mini ? Self.miniPageWidth : Self.pageWidth }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,6 +50,8 @@ struct ContentView: View {
             // so the top bar and transport are never pushed off-window.
             GeometryReader { geo in
                 ScrollView(.vertical) { mainGrid(width: geo.size.width) }
+                    .onAppear { mini = geo.size.width < Self.onePageWidth }
+                    .onChange(of: geo.size.width) { mini = $0 < Self.onePageWidth }
             }
             transport
             ListeningMeterBar(model: app.meter)
@@ -49,40 +61,62 @@ struct ContentView: View {
         .onAppear { WindowSizer.fitToScreen(idealWidth: Self.bothPagesWidth) }
     }
 
-    // MARK: Top bar
-
-    var topBar: some View {
+    /// Mini mode: the whole menu bar on four short lines, with the audio
+    /// routing (System + IN/OUT devices) on a line of its own.
+    var miniTopBar: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // Row 1
             HStack(spacing: 8) {
                 Button("Open") { app.playlist.openFolder() }.buttonStyle(EntBtn())
                 Button(app.isExporting ? "Saving…" : "Save") { app.exportCurrentTrack() }
                     .buttonStyle(EntBtn())
                     .disabled(app.isExporting)
-                    .help("Render the current track through EMP's effects to a WAV file")
+                searchField
+                orderToggle
+                Spacer(minLength: 0)
+                ColorPicker("", selection: $app.waveColor).labelsHidden().frame(width: 30)
+            }
+            HStack(spacing: 8) {
+                systemCaptureToggle
+                if !app.inputDevices.isEmpty { devicePicker }
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 8) {
+                presetPicker
+                emuPresetPicker
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 8) {
+                qualityToggle
+                dynamicsToggle
+                macroModeToggle
+                if app.macroMode == .vibrato { vibratoSpeedToggle }
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 8) {
+                Button("Save Settings") { app.saveSettings() }.buttonStyle(EntBtn())
+                Button("Load Settings") { app.loadSettings() }.buttonStyle(EntBtn())
+                Button("Listener Report") { app.exportListenerReport() }.buttonStyle(EntBtn())
                 if let status = app.exportStatus {
                     Text(status)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(Color(hex: "#8f8778"))
                         .lineLimit(1)
-                        .frame(maxWidth: 180, alignment: .leading)
                         .onTapGesture { if !app.isExporting { app.exportStatus = nil } }
                 }
-                searchField
-                Divider().frame(height: 22)
-                orderToggle
-                Group {
-                    Button("Save Settings") { app.saveSettings() }.buttonStyle(EntBtn())
-                    Button("Load Settings") { app.loadSettings() }.buttonStyle(EntBtn())
-                    Button("Listener Report") { app.exportListenerReport() }.buttonStyle(EntBtn())
+                if let err = app.systemCaptureError {
+                    Text(err)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(Color(hex: "#ff4444"))
+                        .lineLimit(1)
+                        .onTapGesture { app.systemCaptureError = nil }
                 }
-                Spacer()
-                Text("COLOR").font(.system(size: 9, design: .monospaced)).foregroundColor(Color(hex:"#8f8778"))
-                ColorPicker("", selection: $app.waveColor).labelsHidden().frame(width: 30)
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 16).padding(.top, 12)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+    }
 
-            // Row 2
+    var row2: some View {
             HStack(spacing: 8) {
                 Group {
                     presetPicker
@@ -109,8 +143,49 @@ struct ContentView: View {
                         .onTapGesture { app.systemCaptureError = nil }
                 }
             }
-            .padding(.horizontal, 16).padding(.bottom, 10)
-        }
+    }
+
+    // MARK: Top bar
+
+    var topBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if mini {
+                miniTopBar
+            } else {
+            // Row 1
+                HStack(spacing: 8) {
+                    Button("Open") { app.playlist.openFolder() }.buttonStyle(EntBtn())
+                    Button(app.isExporting ? "Saving…" : "Save") { app.exportCurrentTrack() }
+                        .buttonStyle(EntBtn())
+                        .disabled(app.isExporting)
+                        .help("Render the current track through EMP's effects to a WAV file")
+                    if let status = app.exportStatus {
+                        Text(status)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(Color(hex: "#8f8778"))
+                            .lineLimit(1)
+                            .frame(maxWidth: 180, alignment: .leading)
+                            .onTapGesture { if !app.isExporting { app.exportStatus = nil } }
+                    }
+                    searchField
+                    Divider().frame(height: 22)
+                    orderToggle
+                    Group {
+                        Button("Save Settings") { app.saveSettings() }.buttonStyle(EntBtn())
+                        Button("Load Settings") { app.loadSettings() }.buttonStyle(EntBtn())
+                        Button("Listener Report") { app.exportListenerReport() }.buttonStyle(EntBtn())
+                    }
+                    Spacer()
+                    Text("COLOR").font(.system(size: 9, design: .monospaced)).foregroundColor(Color(hex:"#8f8778"))
+                    ColorPicker("", selection: $app.waveColor).labelsHidden().frame(width: 30)
+                }
+                .padding(.horizontal, 16).padding(.top, 12)
+    
+                // Row 2 (scrolls sideways in mini mode instead of overflowing)
+                row2
+                .padding(.horizontal, 16).padding(.bottom, 10)
+            }
+            }
         .background(Color(hex:"#29241e"))
     }
 
@@ -316,12 +391,20 @@ struct ContentView: View {
     // the window is wide enough, otherwise one at a time with tabs.
 
     func mainGrid(width: CGFloat) -> some View {
-        let both = width >= Self.bothPagesWidth
+        let both = mini || width >= Self.bothPagesWidth
         return HStack(alignment: .top, spacing: 14) {
             preampPanel
             if both {
-                effectsPage
-                emulationPage
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top, spacing: 14) {
+                        effectsPage
+                        emulationPage
+                    }
+                    HStack(alignment: .top, spacing: 14) {
+                        blurPanel(width: pageWidth)
+                        gritPanel(width: pageWidth)
+                    }
+                }
             } else {
                 Spacer(minLength: 0)
                 VStack(alignment: .leading, spacing: 8) {
@@ -333,12 +416,14 @@ struct ContentView: View {
                             .buttonStyle(EntBtn(active: false))
                     }
                     if page == .effects { effectsPage } else { emulationPage }
+                    blurPanel(width: pageWidth)
+                    gritPanel(width: pageWidth)
                 }
-                .frame(width: Self.pageWidth)
+                .frame(width: pageWidth)
             }
             Spacer(minLength: 0)
             macroSliderPanel
-            bandEQPanel
+            if !mini { bandEQPanel }
             postGainPanel
         }
         .padding(14)
@@ -385,9 +470,9 @@ struct ContentView: View {
                     .foregroundColor(Color(hex: "#d9d1bf").opacity(0.75))
                 content()
             }
-            .padding(14)
+            .padding(mini ? 10 : 14)
         }
-        .frame(width: Self.pageWidth)
+        .frame(width: pageWidth)
     }
 
     var effectsPage: some View {
@@ -395,7 +480,7 @@ struct ContentView: View {
         // Haze. Saturator Recipes sits under Spectral Haze (the shortest
         // column, 3 knobs) so the page stays a neat rectangle.
         page("Effects") {
-            HStack(alignment: .top, spacing: 22) {
+            HStack(alignment: .top, spacing: mini ? Self.miniColumnGap : 22) {
                 knobGroup("Color") {
                     knobRow(key: "eq",      label: "Lo-Mid EQ", sub: "Gain",
                             display: { String(format: "%.1fdB", $0/100*12) })
@@ -425,16 +510,83 @@ struct ContentView: View {
                         knobRow(key: "blur",   label: "Spec Blur", sub: "Linger",
                                 display: { String(format: "%.1fs", 0.1 + $0/100*2.4) })
                     }
-                    recipesBox.frame(width: Self.columnWidth)
+                    if !mini { recipesBox.frame(width: columnWidth) }
                 }
             }
+            if mini { recipesBox }
         }
+    }
+
+    /// Bottom row, left: ways to dissolve the melody.
+    func blurPanel(width: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            panelBG
+            VStack(alignment: .leading, spacing: mini ? 8 : 12) {
+                Text("BLUR")
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .foregroundColor(Color(hex: "#d9d1bf").opacity(0.75))
+                HStack(alignment: .top, spacing: mini ? Self.miniColumnGap : 22) {
+                    knobGroup("Spectrum") {
+                        knobRow(key: "bsmear", label: "Smear", sub: "Melt notes",
+                                display: { "\(Int($0))%" })
+                        knobRow(key: "bwash", label: "Wash", sub: "Cloud",
+                                display: { "\(Int($0))%" })
+                    }
+                    knobGroup("Shape") {
+                        knobRow(key: "bsoften", label: "Soften", sub: "Attacks",
+                                display: { "\(Int($0))%" })
+                        knobRow(key: "bswell", label: "Swell", sub: "Into pads",
+                                display: { String(format: "%.0f ms", 10 + $0 / 100 * 390) })
+                    }
+                    knobGroup("Space") {
+                        knobRow(key: "bdist", label: "Distance", sub: "Melody dip",
+                                display: { String(format: "−%.1f dB", $0 / 100 * 10) })
+                        knobRow(key: "bdiffuse", label: "Diffuse", sub: "Stereo",
+                                display: { "\(Int($0))%" })
+                    }
+                }
+            }
+            .padding(mini ? 10 : 14)
+        }
+        .frame(width: width, alignment: .leading)
+    }
+
+    /// Bottom row under the pages: comforting texture.
+    func gritPanel(width: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            panelBG
+            VStack(alignment: .leading, spacing: mini ? 8 : 12) {
+                Text("GRIT")
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .foregroundColor(Color(hex: "#d9d1bf").opacity(0.75))
+                HStack(alignment: .top, spacing: mini ? Self.miniColumnGap : 22) {
+                    knobGroup("Texture") {
+                        knobRow(key: "bits", label: "Bit Depth", sub: "Sandy",
+                                display: { String(format: "%.1f bit", 10 - $0 / 100 * 7) })
+                        knobRow(key: "softclip", label: "Soft Clip", sub: "Low-mids",
+                                display: { "\(Int($0))%" })
+                    }
+                    knobGroup("Dust") {
+                        knobRow(key: "gnoise", label: "Grain", sub: "Dust",
+                                display: { "\(Int($0))%" })
+                        knobRow(key: "rattle", label: "Rattle", sub: "Loose parts",
+                                display: { "\(Int($0))%" })
+                    }
+                    knobGroup("Body") {
+                        knobRow(key: "corpus", label: "Corpus", sub: "Wood body",
+                                display: { "\(Int($0))%" })
+                    }
+                }
+            }
+            .padding(mini ? 10 : 14)
+        }
+        .frame(width: width, alignment: .leading)
     }
 
     var recipesBox: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("SATURATOR RECIPES")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(.system(size: mini ? 9 : 11, weight: .semibold, design: .monospaced))
                 .foregroundColor(Color(hex:"#d9d1bf").opacity(0.35))
             VStack(alignment: .leading, spacing: 6) {
                 Picker("", selection: Binding(get: { app.satRecipe }, set: { app.setRecipe($0) })) {
@@ -443,20 +595,22 @@ struct ContentView: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .frame(width: 200)
-                Text(SaturatorRecipe.named(app.satRecipe).blurb)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(Color(hex:"#8f8778"))
-                    .fixedSize(horizontal: false, vertical: true)
+                if !mini {
+                    Text(SaturatorRecipe.named(app.satRecipe).blurb)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(Color(hex:"#8f8778"))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
-        .padding(12)
+        .padding(mini ? 6 : 12)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 2).fill(Color.black.opacity(0.18)))
     }
 
     var emulationPage: some View {
         page("Emulation") {
-            HStack(alignment: .top, spacing: 22) {
+            HStack(alignment: .top, spacing: mini ? Self.miniColumnGap : 22) {
                 knobGroup("Choir") {
                     knobRow(key: "voices", label: "Voices",  sub: "Singers",
                             display: { "\(Int(($0 / 100 * 16).rounded()))" })
@@ -492,13 +646,15 @@ struct ContentView: View {
     }
 
     func knobGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: mini ? 8 : 12) {
             Text(title.uppercased())
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(.system(size: mini ? 9 : 11, weight: .semibold, design: .monospaced))
                 .foregroundColor(Color(hex:"#d9d1bf").opacity(0.35))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             content()
         }
-        .frame(width: Self.columnWidth, alignment: .topLeading)   // equal columns on both pages
+        .frame(width: columnWidth, alignment: .topLeading)   // equal columns on both pages
     }
 
     @ViewBuilder
@@ -513,6 +669,11 @@ struct ContentView: View {
             get: { app.ranges[key]?.max ?? 100 },
             set: { var r = app.ranges[key] ?? .init(); r.max = $0; app.ranges[key] = r; app.applyAllDSP() })
 
+        if mini {
+            // Mini mode: just the knob with its label and value; no range sliders.
+            KnobView(label: label, sublabel: "", value: sensitivity, display: { "\(Int($0))%" },
+                     compact: true)
+        } else {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 KnobView(label: label, sublabel: "Sensitivity",
@@ -533,6 +694,7 @@ struct ContentView: View {
                     }
                 }
             }
+        }
         }
     }
 

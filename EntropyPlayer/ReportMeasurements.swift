@@ -33,6 +33,8 @@ struct ChainSettings {
     var depth = 0.0
     var bandEQ = [0.0, 0.0, 0.0, 0.0]
     var postTube = 0.0
+    var gritBits = 0.0, gritClip = 0.0, gritNoise = 0.0, gritCorpus = 0.0, gritRattle = 0.0
+    var blurSmear = 0.0, blurWash = 0.0, blurSoften = 0.0, blurDistance = 0.0, blurSwell = 0.0, blurDiffuse = 0.0
     var choirVoices = 0.0, choirDetune = 0.0, choirDelay = 0.0, choirVibrato = 0.0
     var rolloff = 0.0
     var compressor = false
@@ -71,6 +73,7 @@ enum ReportMeasurer {
         let er = TapeSelfErasure(); er.setStrength(s.erase)
         let fs1 = SubsonicFilter(), fs2 = SubsonicFilter()
         let beq = FourBandEQ(); beq.setGains(db: s.bandEQ)
+        let gt = Grit(); gt.set(bits: s.gritBits, softClip: s.gritClip, noise: 0)   // noise excluded from THD
         let pt = PostTubeSaturator(); pt.configure(amount: s.postTube, recipe: s.recipe)
         var ptScratch = [Float](repeating: 0, count: 470)
         let ta = TubeAmp(); ta.setFuzz(s.fuzz); ta.setBloom(s.bloom); ta.setFur(s.fur)
@@ -101,6 +104,7 @@ enum ReportMeasurer {
                 sg.process(left: q, right: nil, count: c)
                 ta.process(left: q, right: nil, count: c)
                 for j in 0..<c { q[j] /= fixedDrive }     // fixed +7 dB is undone after the saturation stage
+                gt.process(left: q, right: nil, count: c)
                 beq.process(q, count: c, channel: 0)
                 ptScratch.withUnsafeMutableBufferPointer { sb in      // mono: the right channel is scratch
                     sb.baseAddress!.assign(from: q, count: c)
@@ -120,12 +124,14 @@ enum ReportMeasurer {
         let n = input.count
         let gd = GroupDelay(); gd.setScale(s.gdScale); gd.flushParameters()
         let bl = SpectralBlur(); bl.setStrength(s.blur)
+        let mb = MelodyBlur(); mb.set(smear: s.blurSmear, wash: s.blurWash, soften: s.blurSoften, distance: s.blurDistance, swell: s.blurSwell, diffuse: s.blurDiffuse)
         let gr = GrainEcho(); gr.setStrength(s.grain)
         let ch = Choir(); ch.setVoices(s.choirVoices); ch.setDetune(s.choirDetune)
         ch.setDelay(s.choirDelay); ch.setVibrato(s.choirVibrato)
         let rv = ConvolutionReverb(); rv.setDecay(s.reverbDecaySec)
         let sh = Shimmer(); sh.setStrength(s.shimmer)
         let dp = Depth(); dp.setAmount(s.depth)
+        let gl = GlowGlue(); gl.setAmount(max(s.shimmer, s.depth))
         var l = input, r = input
         l.withUnsafeMutableBufferPointer { lb in
             r.withUnsafeMutableBufferPointer { rb in
@@ -133,11 +139,13 @@ enum ReportMeasurer {
                 while i < n {
                     let c = min(470, n - i), a = lb.baseAddress! + i, b = rb.baseAddress! + i
                     ch.process(left: a, right: b, count: c)
+                    mb.process(left: a, right: b, count: c)
                     gd.process(left: a, right: b, count: c)
                     bl.process(left: a, right: b, count: c)
                     gr.process(left: a, right: b, count: c)
                     sh.process(left: a, right: b, count: c)
                     dp.process(left: a, right: b, count: c)
+                    gl.process(left: a, right: b, count: c)
                     rv.process(left: a, right: b, count: c)
                     i += c
                 }

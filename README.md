@@ -36,6 +36,12 @@ Debug builds compile with optimization (`-O`) on purpose: the DSP runs on the re
   2. In EMP press **System**, then choose BlackHole as **IN** and your headphones/DAC as **OUT**.
   3. Grant microphone access when asked (macOS treats any audio input that way).
 
+### Window sizes
+
+- **Wide:** the Effects and Emulation pages sit side by side.
+- **Medium:** one page at a time, with tabs to switch.
+- **Mini** (too narrow for even one full page): both pages shrink to compact boxed knobs (title on top, no range sliders) and sit side by side; the full menu bar wraps onto a few short lines with System and the IN/OUT devices on their own line; the EQ/Tube column is hidden. Ranges, EQ and Tube keep their settings.
+
 ### How the controls work
 
 Every effect knob is a **sensitivity**: how strongly the **Macro** slider drives that effect. Each knob also has a **Range** (min/max) that the macro sweeps through. In **Vibrato** mode the macro drifts slowly on its own (Slow or Fast).
@@ -46,14 +52,18 @@ Other controls:
 - **Tube** knob (under the EQ): a second tube (even) saturator after the EQ, voiced by the recipe selected under Saturator Recipes; the knob sets its drive (0–18 dB) and 0 is fully bypassed.
 - **Pre-Amp** and **Post-Gain** sliders: input trim and clean output volume (Post-Gain goes up to +48 dB; the output ceiling still catches peaks).
 - **Limiter / Compressor**: the final dynamics stage, with an always-on safety ceiling after it. Just before it, a 24 dB/oct high-pass at 25 Hz removes sub-bass pumping (1–2 Hz wobble, woofer rattle).
-- **FX presets**: 40 presets for the Effects page, grouped by vibe (Nostalgic, Calming, Inspiring, Dreamy, Playful), plus **INIT**. They set every Effects-page knob, the saturator recipe and the macro, and leave the Emulation page alone.
+- **FX presets**: 40 presets for the Effects page, grouped by vibe (Nostalgic, Calming, Inspiring, Dreamy, Playful), plus **INIT**. They set every Effects-page knob, the saturator recipe, the post Tube amount and the macro, and leave the Emulation page alone. Their saturation was tuned by simulation so bass never distorts much more than the mids.
 - **Emulation presets**: 20 presets for Choir, Tape and Tube Amp, grouped by the same vibes, plus **Off**. They combine with any FX preset.
 - **Save / Load Settings**: store your knobs, ranges and recipe as JSON.
 - **Color** picker: the accent color used by the Listener Report.
 
+### Your session is remembered
+
+EMP saves every knob, range, recipe, preset choice and mode as you go, and opens exactly as you left it, except Post-Gain, which comes back 6 dB lower for safety.
+
 ### Effects
 
-Signal flow: **Choir → Color → Temporal Haze (Grain Echo → Shimmer → Depth → Reverb, so the shimmer and undertones are built from the saturated signal and reverberated) → Spectral Haze (smearing the tails too) → Tape → Tube Amp → dynamics → output**. Every effect is level-matched, so turning one up doesn't simply make things louder or push the limiter. The Lo-Mid EQ and High Roll-off are the exceptions, since changing tone is their job.
+Signal flow: **Choir → Blur → Color → Temporal Haze (Grain Echo → Shimmer → Depth → Reverb, so the shimmer and undertones are built from the saturated signal and reverberated) → Spectral Haze (smearing the tails too) → Tape → Tube Amp → dynamics → output**. Every effect is level-matched, so turning one up doesn't simply make things louder or push the limiter. The Lo-Mid EQ and High Roll-off are the exceptions, since changing tone is their job.
 
 **Color**
 | Knob | What it does |
@@ -94,6 +104,29 @@ Signal flow: **Choir → Color → Temporal Haze (Grain Echo → Shimmer → Dep
 | Detune | Each singer holds a pitch offset within ±d (up to ±35 cents) around its own fixed "tendency" (−d/2…+d/2), gliding to a new random offset every 10 s |
 | Delay | Each singer's delay (up to 60 ms) wanders the same way, with its own tendency |
 | Vibrato | Per-singer pitch vibrato up to ±40 cents, at a rate that wanders between 3 and 20 Hz |
+
+**Blur** (bottom row, left): for when you don't want to follow the melody
+| Knob | What it does |
+|---|---|
+| Smear | Smooths every frequency across its neighbours and over time (up to 300 ms), so notes overlap and melt into each other, with a gentle pitch drift |
+| Wash | Blends in a slowly averaged (~1.5 s) cloud of the recent harmonies in place of the live sound |
+
+Smear and Wash are resynthesized with phase-locked steady tones, so they stay fluid rather than shaky.
+| Soften | Pulls down note attacks, so notes blur into each other |
+| Swell | Transient-to-pad: every frequency rises slowly (10 → 400 ms), so notes bloom in like a pad instead of striking |
+| Diffuse | Stereo diffusion: a decorrelated copy of the centre is spread into the sides (bass stays centred), so the sound has no clear location |
+| Distance | Dips the melody/presence range (around 1.5 kHz, up to −10 dB) as if the lead were in another room; it is not loudness-compensated, so it never lifts the low-mids |
+
+Blur runs right after the Choir, before the Effects page, so everything downstream works on the blurred sound. It is loudness-matched and adds a constant ~46 ms of latency.
+
+**Grit** (bottom row, right)
+| Knob | What it does |
+|---|---|
+| Bit Depth | 10 → 3 bits relative to the music's own level, with the quantization error filtered to ~150 Hz–2.5 kHz: sandy grit, no hiss, silent silences |
+| Soft Clip | Asymmetric (warm, even-harmonic) soft clipping of the 100 Hz–1.2 kHz band, auto-gained so it always bites |
+| Grain | Sparse dust/film-grain crackle (200 Hz–5 kHz) that follows the music's level, so silences stay clean |
+| Rattle | A buzz on bass peaks, like a loose part on an old speaker (up to about −24 dB) |
+| Corpus | A mix of a wooden-body resonator (up to about −10 dB) (ten broad, slowly swaying modes, so nothing settles into a standing tone) |
 
 **Tube Amp** (Emulation page)
 | Knob | What it does |
@@ -140,6 +173,9 @@ EntropyPlayer/
   SaturatorRecipes.swift     recipe definitions and shaping stage
   Tape.swift                 tape hysteresis and sag
   TubeAmp.swift              transformer fuzz, bass bloom, bias-shift fur
+  MelodyBlur.swift           Blur section (smear, wash, soften, distance)
+  Grit.swift                 Grit section (bit depth, soft clip, grain)
+  Session.swift              saves/restores the session
   Choir.swift                ensemble of detuned, delayed, panned singers
   Depth.swift                undertones (subharmonics) of the upper band
   CustomEQ.swift             lo-mid bell, high roll-off, subsonic filter

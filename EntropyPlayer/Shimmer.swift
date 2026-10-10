@@ -33,7 +33,9 @@ final class Shimmer {
     private static let apGain: Float = 0.5
     private static let loopDelay = 2600              // ~59 ms before feeding back (centre)
     private static let dampCoef = Float(1 - exp(-2 * Double.pi * 3000 / 44100))
-    private static let loopSize = 4096               // room for the modulated read
+    private static let loopSize = 4096
+    private static let envAtk = Float(1 - exp(-1 / (0.030 * 44100)))
+    private static let envRel = Float(1 - exp(-1 / (0.300 * 44100)))               // room for the modulated read
     private static let loopMod = 130.0               // ±3 ms slow wander of the loop delay
 
     private let lock = NSLock()
@@ -66,6 +68,17 @@ final class Shimmer {
     private var loopIdx = 0
     private var modPh = (0.0, 0.37)                    // loop-delay LFO phases (L, R)
     private var damp: (Float, Float) = (0, 0)          // treble damping inside the loop
+
+    // Cohesion with the music:
+    //  • the glow follows the dry signal's level (30 ms attack / 300 ms
+    //    release): it can never sustain on its own once the music moves on,
+    //    so it reads as the note's resonance rather than a separate drone;
+    //  • a short "room" (two longer allpasses per side, ~25–32 ms) places the
+    //    glow slightly behind the music in the same space.
+    private var dryEnv: Float = 0, glowEnv: Float = 0, followGain: Float = 1
+    private static let roomLen = [[1031, 1327], [1103, 1409]]
+    private let roomBufs: [[UnsafeMutablePointer<Float>]]
+    private var roomIdx = [[0, 0], [0, 0]]
 
     private var lpState: Float = 0, hpState: Float = 0, hpPrev: Float = 0
     private let lpCoef = Float(1 - exp(-2 * Double.pi * 2500 / 44100))
@@ -105,12 +118,14 @@ final class Shimmer {
         shiftBuf.initialize(repeating: 0, count: Self.shiftSize)
         apBufs = Self.apDelays.map { $0.map { buf($0) } }
         loopBuf = [buf(Self.loopSize), buf(Self.loopSize)]
+        roomBufs = Self.roomLen.map { $0.map { buf($0) } }
     }
 
     deinit {
         shiftBuf.deallocate(); ratios.deallocate(); phases.deallocate(); extraDelay.deallocate(); ratioLPCoef.deallocate(); ratioLP.deallocate()
         apBufs.flatMap { $0 }.forEach { $0.deallocate() }
         loopBuf.forEach { $0.deallocate() }
+        roomBufs.flatMap { $0 }.forEach { $0.deallocate() }
     }
 
     /// strength: 0 (off) … 1 (loud, long-sustaining glow).
@@ -127,6 +142,8 @@ final class Shimmer {
         }
         loopBuf.forEach { $0.assign(repeating: 0, count: Self.loopSize) }; damp = (0, 0)
         lpState = 0; hpState = 0; hpPrev = 0
+        roomBufs.enumerated().forEach { ch, bs in bs.enumerated().forEach { a, b in b.assign(repeating: 0, count: Self.roomLen[ch][a]) } }
+        dryEnv = 0; glowEnv = 0; followGain = 1
         ratioLP.assign(repeating: 0, count: ratioCount * 2)
     }
 
@@ -252,8 +269,28 @@ final class Shimmer {
             // Level compensation (measured on pink noise): the sustained glow
             // otherwise adds up to ~4.3 dB at full strength.
             let comp = Float(1 / (1 + 1.69 * pow(strength, 3.5)).squareRoot())
-            left[i] = (l + outs.0 * mix) * comp
-            right?[i] = (r + outs.1 * mix) * comp
+
+            // Same space, slightly behind: short room on the glow only.
+            var gl = outs.0, gr = outs.1
+            for ch in 0..<2 {
+                var v = ch == 0 ? gl : gr
+                for a in 0..<2 {
+                    let b = roomBufs[ch][a], len = Self.roomLen[ch][a], idx = roomIdx[ch][a]
+                    let d = b[idx], w = v + 0.5 * d
+                    b[idx] = w; v = d - 0.5 * w
+                    roomIdx[ch][a] = idx + 1 == len ? 0 : idx + 1
+                }
+                if ch == 0 { gl = v } else { gr = v }
+            }
+            // Follow the music: limit the glow to the dry signal's envelope.
+            let dl = max(abs(l), abs(r)), gLevel = max(abs(gl), abs(gr)) * mix
+            dryEnv += (dl > dryEnv ? Self.envAtk : Self.envRel) * (dl - dryEnv)
+            glowEnv += (gLevel > glowEnv ? Self.envAtk : Self.envRel) * (gLevel - glowEnv)
+            let want = min(1, 1.2 * dryEnv / max(glowEnv, 1e-6))
+            followGain += (want < followGain ? 0.004 : 0.0008) * (want - followGain)
+            let wet = mix * followGain
+            left[i] = (l + gl * wet) * comp
+            right?[i] = (r + gr * wet) * comp
         }
     }
 }

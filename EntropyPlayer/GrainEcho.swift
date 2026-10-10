@@ -38,6 +38,8 @@ final class GrainEcho {
     private var strength: Double = 0                // smoothed
     private var untilNextGrain: Double = 0
     private var rng: UInt64 = 0x2545F4914F6CDD1D
+    // Safety ceiling: the haze never exceeds ~1.5× the dry signal's level.
+    private var dryEnv: Float = 0, hazeEnv: Float = 0, ceilingGain: Float = 1
 
     private struct Voice {
         var active = false
@@ -83,7 +85,10 @@ final class GrainEcho {
         let rate = pow(2, cents / 1200)
         // Start somewhere in the memory window, far enough back that a
         // slightly-fast grain can't overtake the write head.
-        let minBack = grainLen * max(0, rate - 1) + 8
+        // Also at least 25 ms back: grains replaying audio only a few ms old
+        // comb-filter against the dry signal into a whistling, feedback-like
+        // resonance (worst at low strengths, where the memory window is short).
+        let minBack = grainLen * max(0, rate - 1) + max(8, 0.025 * Self.sampleRate)
         let back = minBack + random() * max(1, memory - minBack)
         let pan = random() * 2 - 1                         // −1…1
         let angle = (pan + 1) * Double.pi / 4              // equal-power
@@ -154,6 +159,15 @@ final class GrainEcho {
                 voices[v].phase = ph + voices[v].phaseInc
                 if voices[v].phase >= 1 { voices[v].active = false }
             }
+
+            // Safety ceiling (fast attack, slow release) so overlapping grains
+            // that happen to line up can never swell into a loud burst.
+            let dl = max(abs(l), abs(r)), hl = max(abs(outL), abs(outR)) * mix
+            dryEnv += (dl > dryEnv ? 0.01 : 0.0003) * (dl - dryEnv)
+            hazeEnv += (hl > hazeEnv ? 0.01 : 0.0003) * (hl - hazeEnv)
+            let want = min(1, 1.5 * dryEnv / max(hazeEnv, 1e-6))
+            ceilingGain += (want < ceilingGain ? 0.02 : 0.0005) * (want - ceilingGain)
+            outL *= ceilingGain; outR *= ceilingGain
 
             // Level compensation (measured on pink noise): dry + haze would
             // otherwise sum up to ~4 dB louder at full strength.

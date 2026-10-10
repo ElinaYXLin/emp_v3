@@ -22,7 +22,7 @@ final class OfflineChain {
     static let sampleRate = 44100.0
     /// Fixed latency of the chain: group delay (512 + 64), spectral blur
     /// (2048), tape sag (88), wow & flutter centre delay (88).
-    static let latency = 512 + 64 + 2048 + 88 + TapeWowFlutter.latency
+    static let latency = 512 + 64 + 2048 + 88 + TapeWowFlutter.latency + MelodyBlur.latency
 
     private let s: ChainSettings
     private let gd = GroupDelay(), bl = SpectralBlur(), gr = GrainEcho(), ch = Choir()
@@ -32,6 +32,7 @@ final class OfflineChain {
     private let th = TapeHysteresis(), sg = TapeSag(), ta = TubeAmp(), ro = HighRolloff()
     private let wf = TapeWowFlutter(), er = TapeSelfErasure()
     private let fs1 = SubsonicFilter(), fs2 = SubsonicFilter()
+    private let gl = GlowGlue(), gt = Grit(), mb = MelodyBlur()
     private let dp = Depth(), beq = FourBandEQ(), pt = PostTubeSaturator()
     private let dyn = WebAudioCompressor(), ceiling = WebAudioCompressor()
     private let inGain: Float, fixedDrive: Float, postGain: Float
@@ -47,7 +48,7 @@ final class OfflineChain {
         ev.setDrive(driveDb: min(24, s.evenDb * s.recipe.evenMul)); ev.setBias(s.recipe.bias); ev.setWobble(s.wobble)
         od.setDrive(driveDb: min(24, s.oddDb * s.recipe.oddMul))
         th.setStrength(s.hysteresis); sg.setStrength(s.sag); ro.setSlope(dbPerOctave: s.rolloff)
-        dp.setAmount(s.depth); beq.setGains(db: s.bandEQ); pt.configure(amount: s.postTube, recipe: s.recipe)
+        mb.set(smear: s.blurSmear, wash: s.blurWash, soften: s.blurSoften, distance: s.blurDistance, swell: s.blurSwell, diffuse: s.blurDiffuse); gt.set(bits: s.gritBits, softClip: s.gritClip, noise: s.gritNoise, corpus: s.gritCorpus, rattle: s.gritRattle); dp.setAmount(s.depth); gl.setAmount(max(s.shimmer, s.depth)); beq.setGains(db: s.bandEQ); pt.configure(amount: s.postTube, recipe: s.recipe)
         wf.setStrength(s.wow); er.setStrength(s.erase)
         ta.setFuzz(s.fuzz); ta.setBloom(s.bloom); ta.setFur(s.fur)
         dyn.setSampleRate(Self.sampleRate)
@@ -74,6 +75,7 @@ final class OfflineChain {
             let n = min(470, total - done), a = l + done, b = r + done
             for i in 0..<n { a[i] *= inGain; b[i] *= inGain }
             ch.process(left: a, right: b, count: n)
+            mb.process(left: a, right: b, count: n)
             eq.process(a, count: n, channel: 0); eq.process(b, count: n, channel: 1)
             for i in 0..<n { a[i] *= fixedDrive; b[i] *= fixedDrive }
             for ch in 0..<2 {
@@ -90,6 +92,7 @@ final class OfflineChain {
             gr.process(left: a, right: b, count: n)
             sh.process(left: a, right: b, count: n)
             dp.process(left: a, right: b, count: n)
+            gl.process(left: a, right: b, count: n)
             rv.process(left: a, right: b, count: n)
             gd.process(left: a, right: b, count: n)
             bl.process(left: a, right: b, count: n)
@@ -103,6 +106,7 @@ final class OfflineChain {
             wf.process(left: a, right: b, count: n)
             ta.process(left: a, right: b, count: n)
             for i in 0..<n { a[i] /= fixedDrive; b[i] /= fixedDrive }
+            gt.process(left: a, right: b, count: n)
             beq.process(a, count: n, channel: 0); beq.process(b, count: n, channel: 1)
             pt.process(left: a, right: b, count: n)
             fs1.process(a, count: n, channel: 0); fs1.process(b, count: n, channel: 1)
@@ -220,13 +224,15 @@ extension AppState {
         cs.recipe = SaturatorRecipe.named(satRecipe)
         cs.hysteresis = eff("hyst"); cs.sag = eff("sag")
         cs.depth = eff("depth"); cs.bandEQ = bandEQ; cs.postTube = postTube / 100
+        cs.blurSmear = eff("bsmear"); cs.blurWash = eff("bwash"); cs.blurSoften = eff("bsoften"); cs.blurDistance = eff("bdist"); cs.blurSwell = eff("bswell"); cs.blurDiffuse = eff("bdiffuse")
+        cs.gritBits = eff("bits"); cs.gritClip = eff("softclip"); cs.gritNoise = eff("gnoise"); cs.gritCorpus = eff("corpus"); cs.gritRattle = eff("rattle")
         cs.wow = eff("wow"); cs.erase = eff("erase"); cs.wobble = eff("wobble")
         cs.fuzz = eff("fuzz"); cs.bloom = eff("bloom"); cs.fur = eff("fur")
         cs.rolloff = eff("rolloff") * 6
         cs.compressor = dynamicsMode == .compressor
         cs.gdScale = eff("gd") * 20
         cs.gdRandom = eff("gdrand") * 0.5
-        cs.blur = eff("blur"); cs.grain = eff("grain")
+        cs.blur = max(eff("blur"), 0.3 * max(eff("shimmer"), eff("depth"))); cs.grain = eff("grain")
         cs.choirVoices = eff("voices"); cs.choirDetune = eff("detune")
         cs.choirDelay = eff("cdelay"); cs.choirVibrato = eff("cvib")
         cs.reverbDecaySec = pow(eff("reverb"), 1.5) * 60
