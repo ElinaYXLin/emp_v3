@@ -87,7 +87,9 @@ final class GroupDelay {
     func setScale(_ scale: Double) {
         paramQueue.async { [weak self] in
             guard let self else { return }
-            self.baseScale = max(0, min(20, scale))
+            let v = max(0, min(20, scale))
+            guard abs(v - self.baseScale) > 1e-6 else { return }   // unchanged: skip the costly redesign
+            self.baseScale = v
             self.applyModulated()
         }
     }
@@ -118,7 +120,9 @@ final class GroupDelay {
     func setRandomness(_ r: Double) {
         paramQueue.async { [weak self] in
             guard let self else { return }
-            self.randomness = max(0, min(0.5, r))
+            let v = max(0, min(0.5, r))
+            guard abs(v - self.randomness) > 1e-6 else { return }
+            self.randomness = v
             self.applyModulated()
         }
     }

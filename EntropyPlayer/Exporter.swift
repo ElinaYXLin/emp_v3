@@ -22,7 +22,7 @@ final class OfflineChain {
     static let sampleRate = 44100.0
     /// Fixed latency of the chain: group delay (512 + 64), spectral blur
     /// (2048), tape sag (88), wow & flutter centre delay (88).
-    static let latency = 512 + 64 + 2048 + 88 + TapeWowFlutter.latency + MelodyBlur.latency
+    static let latency = 512 + 64 + 2048 + 88 + TapeWowFlutter.latency + MelodyBlur.latency + LookaheadLimiter.latency + ResonanceTamer.latency
 
     private let s: ChainSettings
     private let gd = GroupDelay(), bl = SpectralBlur(), gr = GrainEcho(), ch = Choir()
@@ -33,8 +33,8 @@ final class OfflineChain {
     private let wf = TapeWowFlutter(), er = TapeSelfErasure()
     private let fs1 = SubsonicFilter(), fs2 = SubsonicFilter()
     private let gl = GlowGlue(), gt = Grit(), mb = MelodyBlur()
-    private let dp = Depth(), beq = FourBandEQ(), pt = PostTubeSaturator()
-    private let dyn = WebAudioCompressor(), ceiling = WebAudioCompressor()
+    private let dp = Depth(), beq = FourBandEQ(), pt = PostTubeSaturator(), rt = ResonanceTamer()
+    private let dyn = WebAudioCompressor(), ceiling = LookaheadLimiter()
     private let inGain: Float, fixedDrive: Float, postGain: Float
 
     init(_ s: ChainSettings) {
@@ -61,8 +61,6 @@ final class OfflineChain {
             rv.setLowQuality(true); gd.setLowQuality(true); gd.flushParameters()
             ev.setLowQuality(true); od.setLowQuality(true); rs.setLowQuality(true); sh.setLowQuality(true); gr.setLowQuality(true)
         }
-        ceiling.setSampleRate(Self.sampleRate)
-        ceiling.configure(thresholdDb: 0, kneeDb: 0, ratio: 20, attackSec: 0.0005, releaseSec: 0.05, trimDb: 0)
         inGain = Float(pow(10, (s.fileTrimDb + s.preampDb) / 20))
         fixedDrive = Float(pow(10, 7.0 / 20))
         postGain = Float(pow(10, s.postGainDb / 20))
@@ -76,6 +74,14 @@ final class OfflineChain {
             for i in 0..<n { a[i] *= inGain; b[i] *= inGain }
             ch.process(left: a, right: b, count: n)
             mb.process(left: a, right: b, count: n)
+            // Effects page in EMP_V2's order.
+            gd.process(left: a, right: b, count: n)
+            bl.process(left: a, right: b, count: n)
+            gr.process(left: a, right: b, count: n)
+            rv.process(left: a, right: b, count: n)
+            sh.process(left: a, right: b, count: n)
+            dp.process(left: a, right: b, count: n)
+            gl.process(left: a, right: b, count: n)
             eq.process(a, count: n, channel: 0); eq.process(b, count: n, channel: 1)
             for i in 0..<n { a[i] *= fixedDrive; b[i] *= fixedDrive }
             for ch in 0..<2 {
@@ -87,16 +93,6 @@ final class OfflineChain {
                 rs.post(q, count: n, channel: ch)
             }
             ro.process(a, count: n, channel: 0); ro.process(b, count: n, channel: 1)
-            for i in 0..<n { a[i] /= fixedDrive; b[i] /= fixedDrive }
-            // Temporal haze after Color (built from the saturated signal).
-            gr.process(left: a, right: b, count: n)
-            sh.process(left: a, right: b, count: n)
-            dp.process(left: a, right: b, count: n)
-            gl.process(left: a, right: b, count: n)
-            rv.process(left: a, right: b, count: n)
-            gd.process(left: a, right: b, count: n)
-            bl.process(left: a, right: b, count: n)
-            for i in 0..<n { a[i] *= fixedDrive; b[i] *= fixedDrive }
             for ch in 0..<2 {
                 let q = ch == 0 ? a : b
                 th.process(q, count: n, channel: ch)
@@ -109,6 +105,7 @@ final class OfflineChain {
             gt.process(left: a, right: b, count: n)
             beq.process(a, count: n, channel: 0); beq.process(b, count: n, channel: 1)
             pt.process(left: a, right: b, count: n)
+            rt.process(left: a, right: b, count: n)
             fs1.process(a, count: n, channel: 0); fs1.process(b, count: n, channel: 1)
             fs2.process(a, count: n, channel: 0); fs2.process(b, count: n, channel: 1)
             dyn.process(left: a, right: b, count: n)

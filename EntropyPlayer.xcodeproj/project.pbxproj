@@ -33,6 +33,7 @@
 		AA2000000000000000000030 /* Grit.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000030 /* Grit.swift */; };
 		AA2000000000000000000031 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000031 /* Session.swift */; };
 		AA2000000000000000000032 /* MelodyBlur.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000032 /* MelodyBlur.swift */; };
+		AA2000000000000000000033 /* ResonanceTamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000033 /* ResonanceTamer.swift */; };
 		AA2000000000000000000021 /* SaturatorRecipes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000021 /* SaturatorRecipes.swift */; };
 		AA2000000000000000000020 /* Shimmer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000020 /* Shimmer.swift */; };
 		AA2000000000000000000019 /* SpectralBlur.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000019 /* SpectralBlur.swift */; };
@@ -68,6 +69,7 @@
 		AA1000000000000000000030 /* Grit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Grit.swift; sourceTree = "<group>"; };
 		AA1000000000000000000031 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		AA1000000000000000000032 /* MelodyBlur.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MelodyBlur.swift; sourceTree = "<group>"; };
+		AA1000000000000000000033 /* ResonanceTamer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResonanceTamer.swift; sourceTree = "<group>"; };
 		AA1000000000000000000021 /* SaturatorRecipes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaturatorRecipes.swift; sourceTree = "<group>"; };
 		AA1000000000000000000020 /* Shimmer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shimmer.swift; sourceTree = "<group>"; };
 		AA1000000000000000000019 /* SpectralBlur.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpectralBlur.swift; sourceTree = "<group>"; };
@@ -121,6 +123,7 @@
 				AA1000000000000000000030 /* Grit.swift */,
 				AA1000000000000000000031 /* Session.swift */,
 				AA1000000000000000000032 /* MelodyBlur.swift */,
+				AA1000000000000000000033 /* ResonanceTamer.swift */,
 				AA1000000000000000000021 /* SaturatorRecipes.swift */,
 				AA1000000000000000000020 /* Shimmer.swift */,
 				AA1000000000000000000019 /* SpectralBlur.swift */,
@@ -232,6 +235,7 @@
 				AA2000000000000000000030 /* Grit.swift in Sources */,
 				AA2000000000000000000031 /* Session.swift in Sources */,
 				AA2000000000000000000032 /* MelodyBlur.swift in Sources */,
+				AA2000000000000000000033 /* ResonanceTamer.swift in Sources */,
 				AA2000000000000000000021 /* SaturatorRecipes.swift in Sources */,
 				AA2000000000000000000020 /* Shimmer.swift in Sources */,
 				AA2000000000000000000019 /* SpectralBlur.swift in Sources */,

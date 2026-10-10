@@ -110,3 +110,59 @@ final class WebAudioCompressor {
         currentReductionDb = reductionDb
     }
 }
+
+// MARK: - Look-ahead safety limiter
+
+// The final output safety stage (after Post-Gain). A transparent look-ahead
+// peak limiter: the signal is delayed 3 ms while the limiter looks at the
+// peak level coming up, so it can lower the gain smoothly *before* a peak
+// arrives (no overshoot past the ceiling), then recovers over ~250 ms.
+// Replaces a fast compressor (0.5 ms attack / 50 ms release) whose gain
+// bobbed ~20×/s under heavy Post-Gain — an audible pumping "stutter" — and
+// let peaks past full scale into hard clipping. A soft clip just under 0 dBFS
+// catches anything left. Stereo-linked. Realtime-safe.
+final class LookaheadLimiter {
+    static let latency = 132                                      // 3 ms
+    private static let size = 256
+    private let ceiling: Float = 0.944                             // −0.5 dBFS
+    private let bufL = UnsafeMutablePointer<Float>.allocate(capacity: LookaheadLimiter.size)
+    private let bufR = UnsafeMutablePointer<Float>.allocate(capacity: LookaheadLimiter.size)
+    private let peaks = UnsafeMutablePointer<Float>.allocate(capacity: LookaheadLimiter.size)
+    private var w = 0
+    private var gain: Float = 1
+    private let release = Float(1 - exp(-1 / (0.250 * 44100)))
+    private let attack = Float(1 - exp(-1 / (0.0012 * 44100)))     // reaches target well within the 3 ms look-ahead
+
+    init() {
+        bufL.initialize(repeating: 0, count: Self.size); bufR.initialize(repeating: 0, count: Self.size)
+        peaks.initialize(repeating: 0, count: Self.size)
+    }
+    deinit { bufL.deallocate(); bufR.deallocate(); peaks.deallocate() }
+
+    func process(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>?, count: Int) {
+        let mask = Self.size - 1, L = Self.latency
+        for i in 0..<count {
+            let l = left[i], r = right?[i] ?? l
+            bufL[w] = l; bufR[w] = r
+            peaks[w] = max(abs(l), abs(r))
+            // Peak over the look-ahead window (L samples; small, so a scan is fine
+            // every 8 samples, holding the max in between).
+            if i % 8 == 0 || peaks[w] > heldPeak {
+                var m: Float = 0
+                var j = w
+                for _ in 0...L { m = max(m, peaks[j]); j = (j - 1) & mask }
+                heldPeak = m
+            }
+            let target = heldPeak > ceiling ? ceiling / heldPeak : 1
+            gain += (target < gain ? attack : release) * (target - gain)
+            let rd = (w - L) & mask
+            var ol = bufL[rd] * gain, or = bufR[rd] * gain
+            // Backstop soft clip just under full scale.
+            if abs(ol) > 0.97 { ol = (ol > 0 ? 1 : -1) * (0.97 + 0.03 * tanhf((abs(ol) - 0.97) / 0.03)) }
+            if abs(or) > 0.97 { or = (or > 0 ? 1 : -1) * (0.97 + 0.03 * tanhf((abs(or) - 0.97) / 0.03)) }
+            left[i] = ol; right?[i] = or
+            w = (w + 1) & mask
+        }
+    }
+    private var heldPeak: Float = 0
+}

@@ -1,9 +1,10 @@
 import SwiftUI
+import AppKit
 
 // Parameter control: a vertical glass cylinder that fills from the bottom
 // with the value, its colour blending from the interface grey to the
 // accent, with a small line icon inside (like the filament of a tube) that
-// identifies the parameter. Drag up/down to change it.
+// identifies the parameter. Click or drag to the height you want.
 struct KnobView: View {
     let label: String
     let sublabel: String
@@ -114,17 +115,25 @@ struct CylinderControl: View {
         }
         .frame(width: width, height: height)
         .contentShape(Rectangle())
+        // Click anywhere on the cylinder to set the value to that height;
+        // dragging follows the pointer exactly (absolute, not relative —
+        // the old relative drag re-based itself on every change and raced
+        // to the maximum). Hold ⌥ for fine adjustment (¼ speed, relative).
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { drag in
-                    let delta = Double(-drag.translation.height) * 0.55
-                    value = max(0, min(100, startValue + delta))
+                    if NSEvent.modifierFlags.contains(.option) {
+                        let delta = Double(-drag.translation.height) / Double(height) * 25
+                        value = max(0, min(100, (startValue + delta).rounded()))
+                    } else {
+                        let v = Double(1 - drag.location.y / height) * 100
+                        value = max(0, min(100, v.rounded()))
+                    }
                 }
                 .onEnded { _ in startValue = value }
         )
         .onAppear { startValue = value }
-        .onChange(of: value) { v in startValue = v }
-        .help(String(format: "%.0f%%", value))
+        .help(String(format: "%.0f%% — click to set, ⌥-drag for fine control", value))
     }
 }
 

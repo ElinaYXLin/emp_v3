@@ -63,7 +63,7 @@ EMP saves every knob, range, recipe, preset choice and mode as you go, and opens
 
 ### Effects
 
-Signal flow: **Choir → Blur → Color → Temporal Haze (Grain Echo → Shimmer → Depth → Reverb, so the shimmer and undertones are built from the saturated signal and reverberated) → Spectral Haze (smearing the tails too) → Tape → Tube Amp → dynamics → output**. Every effect is level-matched, so turning one up doesn't simply make things louder or push the limiter. The Lo-Mid EQ and High Roll-off are the exceptions, since changing tone is their job.
+Signal flow: **Choir → Blur → Spectral Haze → Temporal Haze (Grain Echo → Reverb → Shimmer → Depth) → Color → Tape → Tube Amp → Grit → EQ → dynamics → output** (the Effects page in EMP_V2's order). Every effect is level-matched, so turning one up doesn't simply make things louder or push the limiter. The Lo-Mid EQ and High Roll-off are the exceptions, since changing tone is their job.
 
 **Color**
 | Knob | What it does |

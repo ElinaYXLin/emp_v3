@@ -69,7 +69,7 @@ final class MelodyBlur {
     // Phase locking: each bin follows the nearest spectral peak's steady
     // phase (keeping its original offset from it), so a note's bins move
     // as one and never beat against each other.
-    private let tgt: UnsafeMutablePointer<Float>
+    private let tgt, swG: UnsafeMutablePointer<Float>
     private let peakS, peakW: UnsafeMutablePointer<Int>
     private var fieldT: Float = 0
     private var fill = 0
@@ -91,7 +91,7 @@ final class MelodyBlur {
         frame = buf(n); re = buf(b); im = buf(b); mag = buf(b); prefix = buf(b + 1)
         smMag = [buf(b), buf(b)]; washPh = [buf(b), buf(b)]; drift = [buf(b), buf(b)]
         prevPh = [buf(b), buf(b)]; freqFast = [buf(b), buf(b)]; freqSlow = [buf(b), buf(b)]
-        detuneField = buf(b); tgt = buf(b)
+        detuneField = buf(b); tgt = buf(b); swG = buf(b)
         swellMag = [buf(b), buf(b)]
         dBuf = Self.dLen.map { buf($0 + 64) }
         peakS = .allocate(capacity: b); peakS.initialize(repeating: 0, count: b)
@@ -102,7 +102,7 @@ final class MelodyBlur {
     deinit {
         vDSP_destroy_fftsetup(fft)
         peakS.deallocate(); peakW.deallocate()
-        (inBuf + accum + ready + avg + smMag + washPh + drift + prevPh + freqFast + freqSlow + swellMag + dBuf + [detuneField, tgt, window, frame, re, im, mag, prefix]).forEach { $0.deallocate() }
+        (inBuf + accum + ready + avg + smMag + washPh + drift + prevPh + freqFast + freqSlow + swellMag + dBuf + [detuneField, tgt, swG, window, frame, re, im, mag, prefix]).forEach { $0.deallocate() }
     }
 
     func set(smear s: Double, wash w: Double, soften so: Double, distance d: Double, swell sw: Double = 0, diffuse df: Double = 0) {
@@ -274,16 +274,32 @@ final class MelodyBlur {
                     S[k] = m
                 }
                 if sw > 1e-4 {
-                    // Swell: slow rise, quick fall, per bin.
+                    // Swell: slow rise, quick fall — tracked per bin, but
+                    // applied below as a gain curve smoothed across
+                    // neighbouring bins (a many-band envelope), so a note's
+                    // bins rise together instead of being reshaped one by one
+                    // (which sounded metallic).
                     let SWm = swellMag[ch]
                     let c = target > SWm[k] ? swAtk : swRel
                     SWm[k] += c * (target - SWm[k])
-                    target += min(1, sw * 4) * (SWm[k] - target)
+                    swG[k] = min(1, SWm[k] / max(target, 1e-12))
                 } else {
                     swellMag[ch][k] = target
+                    swG[k] = 1
                 }
                 tgt[k] = target
                 A[k] += aCoef * (target - A[k])
+            }
+            if sw > 1e-4 {
+                let mix = min(1, sw * 4)
+                prefix[0] = 0
+                for k in 0..<B { prefix[k + 1] = prefix[k] + (k == 0 ? 1 : swG[k]) }
+                for k in 1..<B {
+                    let w = max(2, Int(Float(k) * 0.06))
+                    let lo = max(1, k - w), hi = min(B - 1, k + w)
+                    let gs = (prefix[hi + 1] - prefix[lo]) / Float(hi - lo + 1)
+                    tgt[k] *= 1 + mix * (gs - 1)
+                }
             }
             // Pass 2: nearest peak for every bin (live spectrum for Smear,
             // the Wash average for Wash).
@@ -304,7 +320,7 @@ final class MelodyBlur {
                 }
             }
             nearestPeaks(tgt, peakS)
-            nearestPeaks(A, peakW)
+            if wa > 1e-4 { nearestPeaks(A, peakW) }
             // Pass 3: advance the steady phases of the peaks only.
             for k in 1..<B {
                 if peakS[k] == k {
@@ -317,8 +333,16 @@ final class MelodyBlur {
                     sp -= 2 * Float.pi * (sp / (2 * Float.pi)).rounded()
                     D[k] = sp
                 }
-                if peakW[k] == k {
-                    var wp = WP[k] + expect * FS[k]
+                // Wash cloud: every bin's phase advances at its cloud peak's
+                // tracked frequency plus its own smooth random walk — a soft,
+                // noise-like cloud. (Steady tones locked to peaks made Wash a
+                // spectral resonator, with neighbouring peaks beating at
+                // 20–30 Hz.) Continuous, so no frame-rate jumps.
+                if wa > 1e-4 {
+                    // Frequency-locked to the nearest cloud peak (so one note's
+                    // bins share a pitch and can't beat), phase free (so it
+                    // stays a soft cloud, not a resonator).
+                    var wp = WP[k] + expect * FS[peakW[k]] + 0.15 * gauss()
                     wp -= 2 * Float.pi * (wp / (2 * Float.pi)).rounded()
                     WP[k] = wp
                 }
@@ -326,25 +350,23 @@ final class MelodyBlur {
             // Pass 4: every other bin follows its peak, keeping its original
             // phase offset from it; then build the spectrum.
             for k in 1..<B {
-                let ps = peakS[k], pw = peakW[k]
+                let ps = peakS[k]
                 let sp = ps == k ? D[k] : D[ps] + (PP[k] - PP[ps])
-                let wp = pw == k ? WP[k] : WP[pw] + (PP[k] - PP[pw])
                 let lp = PP[k]
                 let bx = (1 - sm) * cosf(lp) + sm * cosf(sp), by = (1 - sm) * sinf(lp) + sm * sinf(sp)
                 let ph = atan2f(by, bx)
-                // One phase per bin for both layers (weighted blend of the two
-                // steady phases), so Smear and Wash can't beat against each other.
-                let mag = tgt[k] * (1 - wa) + A[k] * wa
-                let cx = (1 - wa) * cosf(ph) + wa * cosf(wp), cy = (1 - wa) * sinf(ph) + wa * sinf(wp)
-                let fph = atan2f(cy, cx)
-                re[k] = mag * cosf(fph)
-                im[k] = mag * sinf(fph)
+                // Live (smeared/swelled) part with its own phase, plus the
+                // Wash cloud added on top: average spectrum, lightly smoothed
+                // across neighbouring bins, with its noise-like phases.
+                let live = tgt[k] * (1 - wa)
+                let cloud = wa > 1e-4 ? wa * (0.25 * A[max(1, k - 1)] + 0.5 * A[k] + 0.25 * A[min(B - 1, k + 1)]) : 0
+                re[k] = live * cosf(ph) + cloud * cosf(WP[k])
+                im[k] = live * sinf(ph) + cloud * sinf(WP[k])
             }
             // Non-peak bins remember their derived phases so they continue
             // smoothly if they become peaks next frame.
             for k in 1..<B {
                 if peakS[k] != k { D[k] = D[peakS[k]] + (PP[k] - PP[peakS[k]]) }
-                if peakW[k] != k { WP[k] = WP[peakW[k]] + (PP[k] - PP[peakW[k]]) }
             }
         } else {
             // Keep state warm so Smear/Wash fade in from the current sound.

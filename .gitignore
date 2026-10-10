@@ -4,3 +4,4 @@ xcuserdata/
 build/
 DerivedData/
 .claude/settings.local.json
+diagnostics/

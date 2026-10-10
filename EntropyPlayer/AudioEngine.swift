@@ -80,6 +80,7 @@ final class AudioEngine {
     private let melodyBlur       = MelodyBlur()
     private let bandEQ           = FourBandEQ()
     private let postTube         = PostTubeSaturator()
+    private let resonanceTamer   = ResonanceTamer()
     // Spectral haze: per-frequency level slew (see SpectralBlur.swift).
     private let spectralBlur     = SpectralBlur()
     // Temporal haze: octave-down feedback glow after the reverb (see Shimmer.swift).
@@ -122,7 +123,7 @@ final class AudioEngine {
     // anything our own DSP produces. This is a second, always-on
     // WebAudioCompressor instance used purely as a brickwall safety ceiling
     // so pushing Post-Gain up compresses gracefully instead of clipping.
-    private let outputCeiling = WebAudioCompressor()
+    private let outputCeiling = LookaheadLimiter()   // final safety (see CustomDynamics.swift)
 
     /// A-weighted level of the final output, for the listening-level meter.
     let listeningMeter = AWeightedMeter()
@@ -166,13 +167,6 @@ final class AudioEngine {
         compressor.setSampleRate(44100)
         reverbFilter.setSampleRate(44100)
         groupDelay.setSampleRate(44100)
-
-        // Transparent until driven — same brickwall shape as the Limiter
-        // mode, but this one is never user-switchable and always active,
-        // purely to catch Post-Gain overs before they hit the hardware.
-        outputCeiling.setSampleRate(44100)
-        outputCeiling.configure(thresholdDb: 0, kneeDb: 0, ratio: 20,
-                                 attackSec: 0.0005, releaseSec: 0.05, trimDb: 0)
 
         // Device buffer size first, then start the engine: resizing it after
         // start left the output unit with a stale 470-frame slice limit while
@@ -370,14 +364,21 @@ final class AudioEngine {
 
     /// The full DSP chain, in place, on the render thread.
     private func renderChain(left l: UnsafeMutablePointer<Float>, right r: UnsafeMutablePointer<Float>, count n: Int) {
-        // Emulation › Choir first, then the Effects page: color, temporal
-        // haze, spectral haze (color first so the shimmer, undertones and
-        // reverb are built from the saturated signal; spectral haze last so
-        // it smears their tails too). The rest of Emulation (tape, tube amp)
-        // follows.
+        // Emulation › Choir and the Blur section first, then the Effects
+        // page in EMP_V2's order. The rest of Emulation (tape, tube amp) follows.
         choir.process(left: l, right: r, count: n)
         // Blur section first (smear, wash, soften, distance), before the Effects page.
         melodyBlur.process(left: l, right: r, count: n)
+
+        // Effects page in EMP_V2's order: spectral haze → temporal haze →
+        // color (Depth and its glue sit with Shimmer).
+        groupDelay.process(left: l, right: r, count: n)
+        spectralBlur.process(left: l, right: r, count: n)
+        grainEcho.process(left: l, right: r, count: n)
+        reverbFilter.process(left: l, right: r, count: n)
+        shimmer.process(left: l, right: r, count: n)
+        depth.process(left: l, right: r, count: n)
+        glowGlue.process(left: l, right: r, count: n)
 
         eqFilter.process(l, count: n, channel: 0)
         eqFilter.process(r, count: n, channel: 1)
@@ -401,17 +402,6 @@ final class AudioEngine {
         vDSP_vsmul(l, 1, &gInv, l, 1, vDSP_Length(n))
         vDSP_vsmul(r, 1, &gInv, r, 1, vDSP_Length(n))
 
-        // Temporal haze.
-        grainEcho.process(left: l, right: r, count: n)
-        shimmer.process(left: l, right: r, count: n)
-        depth.process(left: l, right: r, count: n)
-        glowGlue.process(left: l, right: r, count: n)
-        reverbFilter.process(left: l, right: r, count: n)
-
-        // Spectral haze (after the temporal haze, so it smears the tails too).
-        groupDelay.process(left: l, right: r, count: n)
-        spectralBlur.process(left: l, right: r, count: n)
-
         // Emulation › Tape, then Tube Amp — inside the same +7 dB drive.
         vDSP_vsmul(l, 1, &g, l, 1, vDSP_Length(n))
         vDSP_vsmul(r, 1, &g, r, 1, vDSP_Length(n))
@@ -429,6 +419,8 @@ final class AudioEngine {
         grit.process(left: l, right: r, count: n)
         bandEQ.process(l, count: n, channel: 0); bandEQ.process(r, count: n, channel: 1)
         postTube.process(left: l, right: r, count: n)
+        // Pull down narrow resonances that build up from stacked effects.
+        resonanceTamer.process(left: l, right: r, count: n)
         finalSub1.process(l, count: n, channel: 0); finalSub1.process(r, count: n, channel: 1)
         finalSub2.process(l, count: n, channel: 0); finalSub2.process(r, count: n, channel: 1)
         compressor.process(left: l, right: r, count: n)
@@ -517,9 +509,16 @@ final class AudioEngine {
     /// decaying-noise impulse response (see ConvolutionReverb.swift) — real
     /// convolution, not an algorithmic reverb, so the loudness/character
     /// scales with the macro exactly the same way the web app's does.
+    private var lastReverbDecay = -1.0
     func setReverb(effective eff: Float, skipUpdate: Bool = false) {
         guard !skipUpdate else { return }
         let decaySec = Double(pow(eff, 1.5)) * 60
+        // Rebuilding the impulse response is expensive; only do it when the
+        // decay actually changes (every knob move calls applyAllDSP, and this
+        // used to rebuild the reverb dozens of times a second while dragging
+        // any control — the UI lag).
+        guard abs(decaySec - lastReverbDecay) > 0.005 else { return }
+        lastReverbDecay = decaySec
         reverbFilter.setDecay(decaySec)
     }
 
