@@ -17,7 +17,9 @@ import Foundation
 //
 // Octave-down shifter: a delay line read by two taps whose delays ramp at
 // 0.5 samples/sample (→ half speed), half a cycle apart, crossfaded with
-// sin² windows that always sum to 1. Realtime-safe: fixed buffers only.
+// sin² windows (four heads a quarter-window apart in high quality, which
+// averages out the window-rate ripple two heads produced on sustained
+// notes). Realtime-safe: fixed buffers only.
 //
 // Timing: the octave-down glow arrives ~12 ms after the note (23 ms
 // shifter window plus a fixed delay); Depth's deeper undertones cascade in
@@ -52,6 +54,10 @@ final class Shimmer {
     private let ratios: UnsafeMutablePointer<Double>
     private let phases: UnsafeMutablePointer<Double>
     private let ratioCount: Int
+    // High-quality grain heads: 4 per ratio, each with its own phase and window.
+    private let headPh: UnsafeMutablePointer<Double>
+    private let headW: UnsafeMutablePointer<Double>
+    private var rng: UInt64 = 0x5EED_0F_5717_33AA
     private let cascade: Bool            // feed the glow back through the shifter (next octave down)
     private let progressive: Bool        // knob fades ratios in one at a time
     private let window: Double           // shifter window (samples); average added delay ≈ half of it
@@ -106,6 +112,12 @@ final class Shimmer {
             extraDelay[k] = max(0, target - built)
         }
         ratioCount = rs.count
+        headPh = UnsafeMutablePointer<Double>.allocate(capacity: rs.count * 4)
+        headW = UnsafeMutablePointer<Double>.allocate(capacity: rs.count * 4)
+        for h in 0..<(rs.count * 4) {
+            headPh[h] = Double(h % 4) * 0.25 + 0.03 * Double(h / 4)
+            headW[h] = window * (0.85 + 0.3 * Double((h * 37) % 11) / 10)
+        }
         ratios = UnsafeMutablePointer<Double>.allocate(capacity: rs.count)
         phases = UnsafeMutablePointer<Double>.allocate(capacity: rs.count)
         for (k, v) in rs.enumerated() { ratios[k] = v; phases[k] = Double(k) / Double(rs.count) }
@@ -122,7 +134,7 @@ final class Shimmer {
     }
 
     deinit {
-        shiftBuf.deallocate(); ratios.deallocate(); phases.deallocate(); extraDelay.deallocate(); ratioLPCoef.deallocate(); ratioLP.deallocate()
+        shiftBuf.deallocate(); ratios.deallocate(); phases.deallocate(); headPh.deallocate(); headW.deallocate(); extraDelay.deallocate(); ratioLPCoef.deallocate(); ratioLP.deallocate()
         apBufs.flatMap { $0 }.forEach { $0.deallocate() }
         loopBuf.forEach { $0.deallocate() }
         roomBufs.flatMap { $0 }.forEach { $0.deallocate() }
@@ -218,11 +230,39 @@ final class Shimmer {
                     gk = Float(min(1, max(0, strength * Double(ratioCount) - Double(k))))
                     if gk == 0 { phases[k] += (1 - ratios[k]) / W; if phases[k] >= 1 { phases[k] -= 1 }; continue }
                 }
-                let p1 = phases[k], p2 = p1 + 0.5 - (p1 >= 0.5 ? 1 : 0)
-                let g1 = lowQuality ? Float(4 * p1 * (1 - p1)) : Float(sin(Double.pi * p1))
-                let g2 = lowQuality ? Float(4 * p2 * (1 - p2)) : Float(sin(Double.pi * p2))
+                let p1 = phases[k]
                 let d0 = 4 + lag + extraDelay[k]
-                var v = readShift(d0 + p1 * W) * g1 * g1 + readShift(d0 + p2 * W) * g2 * g2
+                var v: Float = 0
+                if lowQuality {
+                    // Low quality: two heads, parabolic windows.
+                    let p2 = p1 + 0.5 - (p1 >= 0.5 ? 1 : 0)
+                    let g1 = Float(4 * p1 * (1 - p1)), g2 = Float(4 * p2 * (1 - p2))
+                    v = readShift(d0 + p1 * W) * g1 * g1 + readShift(d0 + p2 * W) * g2 * g2
+                } else {
+                    // Four independent grain heads, each restarting with a
+                    // randomized window length (±30 %), normalized by their
+                    // summed window weight. Lockstep heads interfered with
+                    // themselves periodically at the window rate (~21 Hz for an
+                    // octave down) — an audible stutter on sustained notes;
+                    // decorrelated heads leave only a soft, irregular texture.
+                    var wsum: Float = 0
+                    let r = ratios[k]
+                    for j in 0..<4 {
+                        let h = k * 4 + j
+                        let pj = headPh[h]
+                        let gj = Float(sin(Double.pi * pj)); let w2 = gj * gj
+                        v += readShift(d0 + pj * headW[h]) * w2
+                        wsum += w2
+                        var np = pj + (1 - r) / headW[h]
+                        if np >= 1 {
+                            np -= 1
+                            rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17
+                            headW[h] = W * (0.7 + 0.6 * Double(rng >> 11) / Double(1 << 53))
+                        }
+                        headPh[h] = np
+                    }
+                    v /= max(wsum, 0.25)
+                }
                 let c = ratioLPCoef[k]
                 if c < 1 {                                       // this undertone's own low-pass
                     ratioLP[2 * k] += c * (v - ratioLP[2 * k])

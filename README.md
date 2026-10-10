@@ -44,7 +44,7 @@ Debug builds compile with optimization (`-O`) on purpose: the DSP runs on the re
 
 ### How the controls work
 
-Every effect knob is a **sensitivity**: how strongly the **Macro** slider drives that effect. Each knob also has a **Range** (min/max) that the macro sweeps through. In **Vibrato** mode the macro drifts slowly on its own (Slow or Fast).
+Every effect control is a glass **cylinder** that fills (grey → orange) as you drag it up, with a small icon for its parameter; the slim slider beside it is its **Range**. Each one is a **sensitivity**: how strongly the **Macro** slider drives that effect. Each knob also has a **Range** (min/max) that the macro sweeps through. In **Vibrato** mode the macro drifts slowly on its own (Slow or Fast).
 
 Other controls:
 

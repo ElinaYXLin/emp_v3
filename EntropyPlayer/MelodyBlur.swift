@@ -29,8 +29,8 @@ import Accelerate
 //   room. Applied after the loudness makeup, so it never lifts the low-mids.
 //
 // STFT 2048 / hop 256 (Hann, 87.5 % overlap), always running so latency is a
-// constant 2048 samples (~46 ms). Loudness of Smear/Wash/Soften is matched
-// to the input (up to +9 dB of makeup). Realtime-safe: preallocated buffers.
+// constant 2048 samples (~46 ms). Loudness of Smear/Wash/Soften/Swell is
+// matched to the input (up to +9 dB of makeup). Realtime-safe: preallocated buffers.
 final class MelodyBlur {
     static let latency = 2048
     private static let n = 2048, hop = 256, bins = 1024     // 87.5 % overlap: fine, fluid steps
@@ -246,7 +246,13 @@ final class MelodyBlur {
             d -= 2 * Float.pi * (d / (2 * Float.pi)).rounded()
             PP[k] = lp
             let f = Float(k) + d / expect
-            FF[k] += ffC * (f - FF[k]); FS[k] += fsC * (f - FS[k])
+            // Weight the frequency update by how much live energy this bin
+            // carries relative to its long-term level: near-silent bins (whose
+            // phase is mostly noise) hold their frequency, so Wash's sustained
+            // cloud doesn't wander and flutter on quiet passages.
+            let m = (re[k] * re[k] + im[k] * im[k]).squareRoot()
+            let trust = min(1, m / max(avg[ch][k], 1e-9))
+            FF[k] += ffC * trust * (f - FF[k]); FS[k] += fsC * trust * (f - FS[k])
         }
         let sw = Float(swell)
         if sm > 1e-4 || wa > 1e-4 || sw > 1e-4 {

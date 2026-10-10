@@ -670,32 +670,37 @@ struct ContentView: View {
             set: { var r = app.ranges[key] ?? .init(); r.max = $0; app.ranges[key] = r; app.applyAllDSP() })
 
         if mini {
-            // Mini mode: just the knob with its label and value; no range sliders.
+            // Mini mode: just the cylinder with its label and value; no range.
             KnobView(label: label, sublabel: "", value: sensitivity, display: { "\(Int($0))%" },
-                     compact: true)
+                     compact: true, symbol: Self.symbol(for: key))
         } else {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                KnobView(label: label, sublabel: "Sensitivity",
-                         value: sensitivity, display: { "\(Int($0))%" })
-            }
-            HStack(spacing: 6) {
-                Text("Range").font(.system(size: 8, design: .monospaced)).foregroundColor(Color(hex:"#8f8778")).frame(width:42)
-                VStack(spacing: 3) {
-                    HStack {
-                        Text("\(Int(rangeMin.wrappedValue))%").font(.system(size: 8, design: .monospaced)).foregroundColor(Color(hex:"#8f8778")).frame(width:26)
-                        Slider(value: rangeMin, in: 0...(rangeMax.wrappedValue - 1))
-                            .accentColor(Color(hex:"#c65a2e"))
-                    }
-                    HStack {
-                        Text("\(Int(rangeMax.wrappedValue))%").font(.system(size: 8, design: .monospaced)).foregroundColor(Color(hex:"#8f8778")).frame(width:26)
-                        Slider(value: rangeMax, in: (rangeMin.wrappedValue + 1)...100)
-                            .accentColor(Color(hex:"#ff7a3d"))
-                    }
+            HStack(alignment: .top, spacing: 8) {
+                KnobView(label: label, sublabel: sub, value: sensitivity, display: { "\(Int($0))%" },
+                         symbol: Self.symbol(for: key))
+                VStack(spacing: 2) {
+                    Text("\(Int(rangeMax.wrappedValue))").font(.system(size: 7, design: .monospaced)).foregroundColor(Color(hex:"#6e6a62"))
+                    RangeSliderV(minValue: rangeMin, maxValue: rangeMax, height: 50)
+                    Text("\(Int(rangeMin.wrappedValue))").font(.system(size: 7, design: .monospaced)).foregroundColor(Color(hex:"#6e6a62"))
                 }
+                .help("Range: the part of the knob the Macro sweeps through")
             }
         }
-        }
+    }
+
+    /// Small line icon inside each parameter's cylinder.
+    static func symbol(for key: String) -> String {
+        [
+            "eq": "speaker.wave.2", "sat": "flame", "oddsat": "bolt", "rolloff": "arrow.down.right",
+            "gd": "hourglass", "gdrand": "shuffle", "blur": "aqi.medium",
+            "reverb": "building.columns", "shimmer": "sparkles", "depth": "arrow.down.to.line", "grain": "circle.dotted",
+            "voices": "person.3", "detune": "tuningfork", "cdelay": "clock.arrow.circlepath", "cvib": "waveform.path",
+            "hyst": "arrow.triangle.2.circlepath", "sag": "tortoise", "wow": "hurricane", "erase": "eraser",
+            "fuzz": "scribble", "bloom": "sun.max", "fur": "smoke", "wobble": "metronome",
+            "bsmear": "drop", "bwash": "cloud.fog", "bsoften": "moon", "bswell": "wind",
+            "bdist": "ear", "bdiffuse": "dot.radiowaves.left.and.right",
+            "bits": "square.grid.3x3", "softclip": "waveform", "gnoise": "aqi.low",
+            "rattle": "speaker.wave.3", "corpus": "guitars",
+        ][key] ?? "circle.dotted"
     }
 
     var timeString: String {
@@ -745,13 +750,15 @@ struct ContentView: View {
                                             set: { var e = app.bandEQ; e[b.k] = ($0 / 100 * 24 - 12).rounded(toPlaces: 1); app.bandEQ = e }),
                              display: { v in
                                  let db = v / 100 * 24 - 12
-                                 return abs(db) < 0.05 ? "0 dB" : String(format: "%+.1f dB", db) })
+                                 return abs(db) < 0.05 ? "0 dB" : String(format: "%+.1f dB", db) },
+                             symbol: "slider.vertical.3")
                 }
                 Divider().padding(.vertical, 2)
                 KnobView(label: "Tube", sublabel: SaturatorRecipe.named(app.satRecipe).name,
                          value: Binding(get: { app.postTube }, set: { app.postTube = $0 }),
                          display: { v in v < 0.5 ? "off" : String(format: "%.1f dB",
-                                     min(24, v / 100 * 18 * SaturatorRecipe.named(app.satRecipe).evenMul)) })
+                                     min(24, v / 100 * 18 * SaturatorRecipe.named(app.satRecipe).evenMul)) },
+                         symbol: "flame")
                     .help("Post tube saturator: a second even (tube) saturator after the EQ, voiced by the recipe selected under Saturator Recipes.")
                 Spacer(minLength: 0)
             }
