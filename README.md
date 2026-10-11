@@ -78,7 +78,7 @@ Signal flow: **Choir → Blur → Spectral Haze → Temporal Haze (Grain Echo �
 |---|---|
 | Grp Delay | Low frequencies are delayed more (up to 20 periods: 200 ms at 100 Hz), with per-frequency scatter for a muddy, smeared low end |
 | GD Random | Slow random drift of that delay (±50 %, 3–6 s glides) |
-| Spec Blur | Each frequency swells in and lingers instead of starting and stopping sharply |
+| Scatter | Spectral Scatter: each frequency band echoes back at its own delay (30–400 ms, varying smoothly across pitch) with feedback, so the music breaks into cascading, scattered fragments |
 
 **Temporal Haze**
 | Knob | What it does |
@@ -108,16 +108,14 @@ Signal flow: **Choir → Blur → Spectral Haze → Temporal Haze (Grain Echo �
 **Blur** (bottom row, left): for when you don't want to follow the melody
 | Knob | What it does |
 |---|---|
-| Smear | Smooths every frequency across its neighbours and over time (up to 300 ms), so notes overlap and melt into each other, with a gentle pitch drift |
-| Wash | Blends in a slowly averaged (~1.5 s) cloud of the recent harmonies in place of the live sound |
+| Smear | Notes melt into their neighbours (smoothed across pitch and up to 300 ms in time); pitch stays intact |
+| Wash | The melody dissolves into a wide, pitched cloud of the last ~1.5 s of harmony |
+| Smoke | Blurs across pitch and time into textured, pitchless fog |
+| Underwater | Dark and muffled: lows linger for seconds, highs fade fast and bloom in slowly, treble dipped up to 8 dB |
+| Swell | Rounds and slows note attacks, from softened onsets to full pad blooms (10 → 400 ms) |
+| Diffuse | Stereo diffusion: the sound loses its location and surrounds you (bass stays centred) |
 
-Smear and Wash are resynthesized with phase-locked steady tones, so they stay fluid rather than shaky.
-| Soften | Pulls down note attacks, so notes blur into each other |
-| Swell | Transient-to-pad: every frequency rises slowly (10 → 400 ms), so notes bloom in like a pad instead of striking |
-| Diffuse | Stereo diffusion: a decorrelated copy of the centre is spread into the sides (bass stays centred), so the sound has no clear location |
-| Distance | Dips the melody/presence range (around 1.5 kHz, up to −10 dB) as if the lead were in another room; it is not loudness-compensated, so it never lifts the low-mids |
-
-Blur runs right after the Choir, before the Effects page, so everything downstream works on the blurred sound. It is loudness-matched and adds a constant ~46 ms of latency.
+Blur runs right after the Choir, before the Effects page. It adds a constant ~140 ms of latency (three spectral stages).
 
 **Grit** (bottom row, right)
 | Knob | What it does |
@@ -164,7 +162,7 @@ EntropyPlayer/
   AppState.swift             UI state, macro/vibrato, presets, settings
   ContentView.swift          main interface
   GroupDelay.swift           1/f group delay with spectral smear
-  SpectralBlur.swift         STFT per-frequency slew
+  SpectralScatter.swift      per-band spectral delay (Spectral Scatter)
   GrainEcho.swift            granular memory haze
   ConvolutionReverb.swift    darkening noise-convolution reverb
   Shimmer.swift              octave-down feedback glow

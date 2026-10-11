@@ -67,7 +67,7 @@ extension AppState {
         let grainMixDb = grain > 0 ? 20 * log10(grain) : -Double.infinity
         let grainLenMs = 30 + grainMemMs * 0.25
         let grainCents = 4 + 31 * grain
-        let blur       = max(eff("blur"), 0.3 * max(eff("shimmer"), eff("depth")))
+        let blur       = eff("blur")
         let blurAtk    = 0.05 + blur * 0.35
         let blurRel    = 0.10 + blur * 2.40
         let shimmer    = eff("shimmer")
@@ -83,7 +83,7 @@ extension AppState {
 
         var cs = ChainSettings()
         cs.preampDb = preampDb; cs.eqDb = eqDb; cs.evenDb = evenDb; cs.oddDb = oddDb
-        cs.recipe = recipe; cs.hysteresis = hyst; cs.sag = sag; cs.depth = depthAmt; cs.bandEQ = bandEQ; cs.postTube = postTube / 100; cs.blurSmear = eff("bsmear"); cs.blurWash = eff("bwash"); cs.blurSoften = eff("bsoften"); cs.blurDistance = eff("bdist"); cs.blurSwell = eff("bswell"); cs.blurDiffuse = eff("bdiffuse"); cs.gritBits = eff("bits"); cs.gritClip = eff("softclip"); cs.gritNoise = eff("gnoise"); cs.gritCorpus = eff("corpus"); cs.gritRattle = eff("rattle"); cs.wow = wow; cs.erase = erase; cs.wobble = wobble; cs.fuzz = fuzz; cs.bloom = bloom; cs.fur = fur; cs.choirVoices = cVoices; cs.choirDetune = cDetune; cs.choirDelay = cDelay; cs.choirVibrato = cVib; cs.rolloff = rollSlope
+        cs.recipe = recipe; cs.hysteresis = hyst; cs.sag = sag; cs.depth = depthAmt; cs.bandEQ = bandEQ; cs.postTube = postTube / 100; cs.blurSmear = eff("bsmear"); cs.blurWash = eff("bwash"); cs.blurSwell = eff("bswell"); cs.blurDiffuse = eff("bdiffuse"); cs.blurSmoke = eff("bsmoke"); cs.blurUnderwater = eff("bunder"); cs.gritBits = eff("bits"); cs.gritClip = eff("softclip"); cs.gritNoise = eff("gnoise"); cs.gritCorpus = eff("corpus"); cs.gritRattle = eff("rattle"); cs.wow = wow; cs.erase = erase; cs.wobble = wobble; cs.fuzz = fuzz; cs.bloom = bloom; cs.fur = fur; cs.choirVoices = cVoices; cs.choirDetune = cDetune; cs.choirDelay = cDelay; cs.choirVibrato = cVib; cs.rolloff = rollSlope
         cs.compressor = dynamicsMode == .compressor
         cs.gdScale = gdScale; cs.blur = blur; cs.grain = grain
         cs.reverbDecaySec = decaySec; cs.shimmer = shimmer
@@ -116,8 +116,8 @@ extension AppState {
                 .init(label: "Group delay",   value: String(format: "%.1f periods → %.0f ms @ 50 Hz, %.0f ms @ 100 Hz, %.1f ms @ 1 kHz", gdScale, gd50ms, gd100ms, gd1kms)),
                 .init(label: "Spectral smear", value: gdScale > 0 ? "±60% delay scatter per 1/12 octave" : "off"),
                 .init(label: "Delay drift",   value: String(format: "±%.0f%%, 3–6 s glides", gdRand)),
-                .init(label: "Spectral blur", value: blur > 0.001
-                      ? String(format: "%.0f%% depth, %.2f s bloom / %.1f s linger per bin", blur * 100, blurAtk, blurRel)
+                .init(label: "Spectral scatter", value: blur > 0.001
+                      ? String(format: "%.0f%%: bands echoed at 30–%.0f ms, feedback %.0f%%", blur * 100, 30 + 388 * (0.25 + 0.75 * blur), 50 * blur)
                       : "off"),
             ]),
             .init(title: "TEMPORAL HAZE", rows: [
@@ -174,8 +174,8 @@ extension AppState {
                       : "off"),
             ]),
             .init(title: "GAIN STAGING", rows: [
-                .init(label: "Blur", value: [eff("bsmear"), eff("bwash"), eff("bsoften"), eff("bdist"), eff("bswell"), eff("bdiffuse")].allSatisfy { $0 < 0.001 } ? "off"
-                      : String(format: "smear %.0f%% (±%.2f oct) · wash %.0f%% (1.5 s cloud) · soften %.0f%% · distance −%.1f dB @ 1.5 kHz · swell %.0f ms · diffuse %.0f%%", eff("bsmear") * 100, eff("bsmear") * 0.25, eff("bwash") * 100, eff("bsoften") * 100, eff("bdist") * 10, 10 + 390 * eff("bswell"), eff("bdiffuse") * 100)),
+                .init(label: "Blur", value: [eff("bsmear"), eff("bwash"), eff("bswell"), eff("bdiffuse"), eff("bsmoke"), eff("bunder")].allSatisfy { $0 < 0.001 } ? "off"
+                      : String(format: "smear %.0f%% · wash %.0f%% · smoke %.0f%% · underwater %.0f%% · swell %.0f ms · diffuse %.0f%%", eff("bsmear") * 100, eff("bwash") * 100, eff("bsmoke") * 100, eff("bunder") * 100, 10 + 390 * eff("bswell"), eff("bdiffuse") * 100)),
                 .init(label: "Grit", value: [eff("bits"), eff("softclip"), eff("gnoise"), eff("corpus"), eff("rattle")].allSatisfy { $0 < 0.001 } ? "off"
                       : String(format: "%.1f-bit level-following grit · soft clip %.0f%% (100 Hz–1.2 kHz) · grain noise %.0f%% · corpus %.0f%% · rattle %.0f%%", 10 - 7 * eff("bits"), eff("softclip") * 100, eff("gnoise") * 100, eff("corpus") * 100, eff("rattle") * 100)),
                 .init(label: "4-band EQ", value: bandEQ.allSatisfy { $0 == 0 } ? "flat"

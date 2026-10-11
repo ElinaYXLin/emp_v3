@@ -507,8 +507,8 @@ struct ContentView: View {
                                 display: { String(format: "%.1fx", $0/100*20) })
                         knobRow(key: "gdrand", label: "GD Random", sub: "Drift",
                                 display: { String(format: "±%.0f%%", $0/100*50) })
-                        knobRow(key: "blur",   label: "Spec Blur", sub: "Linger",
-                                display: { String(format: "%.1fs", 0.1 + $0/100*2.4) })
+                        knobRow(key: "blur",   label: "Scatter", sub: "Spectral echo",
+                                display: { "\(Int($0))%" })
                     }
                     if !mini { recipesBox.frame(width: columnWidth) }
                 }
@@ -529,18 +529,18 @@ struct ContentView: View {
                     knobGroup("Spectrum") {
                         knobRow(key: "bsmear", label: "Smear", sub: "Melt notes",
                                 display: { "\(Int($0))%" })
-                        knobRow(key: "bwash", label: "Wash", sub: "Cloud",
+                        knobRow(key: "bwash", label: "Wash", sub: "Pitched cloud",
                                 display: { "\(Int($0))%" })
                     }
-                    knobGroup("Shape") {
-                        knobRow(key: "bsoften", label: "Soften", sub: "Attacks",
+                    knobGroup("Texture") {
+                        knobRow(key: "bsmoke", label: "Smoke", sub: "Pitchless fog",
                                 display: { "\(Int($0))%" })
+                        knobRow(key: "bunder", label: "Underwater", sub: "Dark, lingering",
+                                display: { "\(Int($0))%" })
+                    }
+                    knobGroup("Shape & Space") {
                         knobRow(key: "bswell", label: "Swell", sub: "Into pads",
                                 display: { String(format: "%.0f ms", 10 + $0 / 100 * 390) })
-                    }
-                    knobGroup("Space") {
-                        knobRow(key: "bdist", label: "Distance", sub: "Melody dip",
-                                display: { String(format: "−%.1f dB", $0 / 100 * 10) })
                         knobRow(key: "bdiffuse", label: "Diffuse", sub: "Stereo",
                                 display: { "\(Int($0))%" })
                     }
@@ -691,12 +691,12 @@ struct ContentView: View {
     static func symbol(for key: String) -> String {
         [
             "eq": "speaker.wave.2", "sat": "flame", "oddsat": "bolt", "rolloff": "arrow.down.right",
-            "gd": "hourglass", "gdrand": "shuffle", "blur": "aqi.medium",
+            "gd": "hourglass", "gdrand": "shuffle", "blur": "sparkles.rectangle.stack",
             "reverb": "building.columns", "shimmer": "sparkles", "depth": "arrow.down.to.line", "grain": "circle.dotted",
             "voices": "person.3", "detune": "tuningfork", "cdelay": "clock.arrow.circlepath", "cvib": "waveform.path",
             "hyst": "arrow.triangle.2.circlepath", "sag": "tortoise", "wow": "hurricane", "erase": "eraser",
             "fuzz": "scribble", "bloom": "sun.max", "fur": "smoke", "wobble": "metronome",
-            "bsmear": "drop", "bwash": "cloud.fog", "bsoften": "moon", "bswell": "wind",
+            "bsmear": "drop", "bwash": "cloud.fog", "bsmoke": "smoke", "bunder": "drop.triangle", "bswell": "wind",
             "bdist": "ear", "bdiffuse": "dot.radiowaves.left.and.right",
             "bits": "square.grid.3x3", "softclip": "waveform", "gnoise": "aqi.low",
             "rattle": "speaker.wave.3", "corpus": "guitars",

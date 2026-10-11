@@ -12,7 +12,7 @@ struct AppSettings: Codable {
     var macro:        Double = 0
     var sensitivity:  [String: Double] = AppSettings.defaultSensitivities
     var ranges:       [String: RangeValue] = [
-        "reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "depth": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init(), "bits": .init(), "softclip": .init(), "gnoise": .init(), "bsmear": .init(), "bwash": .init(), "bsoften": .init(), "bdist": .init(), "corpus": .init(), "rattle": .init(), "bswell": .init(), "bdiffuse": .init()
+        "reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "depth": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init(), "bits": .init(), "softclip": .init(), "gnoise": .init(), "bsmear": .init(), "bwash": .init(), "bsoften": .init(), "bdist": .init(), "corpus": .init(), "rattle": .init(), "bswell": .init(), "bdiffuse": .init(), "bsmoke": .init(), "bunder": .init()
     ]
     var recipe:       String? = nil      // optional: older files predate recipes
     var order:        String = "alpha"
@@ -25,7 +25,7 @@ struct AppSettings: Codable {
 
     /// Knobs added after older settings files/presets were written start at 0.
     static func defaultSensitivity(_ key: String) -> Double {
-        ["depth", "fuzz", "bloom", "fur", "voices", "detune", "cdelay", "cvib", "wobble", "wow", "erase", "bits", "softclip", "gnoise", "bsmear", "bwash", "bsoften", "bdist", "corpus", "rattle", "bswell", "bdiffuse"].contains(key) ? 0 : 50
+        ["depth", "fuzz", "bloom", "fur", "voices", "detune", "cdelay", "cvib", "wobble", "wow", "erase", "bits", "softclip", "gnoise", "bsmear", "bwash", "bsoften", "bdist", "corpus", "rattle", "bswell", "bdiffuse", "bsmoke", "bunder"].contains(key) ? 0 : 50
     }
 }
 
@@ -39,7 +39,7 @@ final class AppState: ObservableObject {
     @Published var preampDb: Double = 0           // -12…0
     @Published var postGainDb: Double = 0         // -24…48, final output volume trim/boost
     @Published var sensitivity: [String: Double] = AppSettings.defaultSensitivities
-    @Published var ranges: [String: RangeValue]  = ["reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "depth": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init(), "bits": .init(), "softclip": .init(), "gnoise": .init(), "bsmear": .init(), "bwash": .init(), "bsoften": .init(), "bdist": .init(), "corpus": .init(), "rattle": .init(), "bswell": .init(), "bdiffuse": .init()]
+    @Published var ranges: [String: RangeValue]  = ["reverb": .init(), "gd": .init(), "gdrand": .init(), "grain": .init(), "depth": .init(), "blur": .init(), "shimmer": .init(), "eq": .init(), "sat": .init(), "oddsat": .init(), "rolloff": .init(), "hyst": .init(), "sag": .init(), "fuzz": .init(), "bloom": .init(), "fur": .init(), "voices": .init(), "detune": .init(), "cdelay": .init(), "cvib": .init(), "wobble": .init(), "wow": .init(), "erase": .init(), "bits": .init(), "softclip": .init(), "gnoise": .init(), "bsmear": .init(), "bwash": .init(), "bsoften": .init(), "bdist": .init(), "corpus": .init(), "rattle": .init(), "bswell": .init(), "bdiffuse": .init(), "bsmoke": .init(), "bunder": .init()]
     @Published var waveColor: Color = Color(hex: "#35d6d0")
     @Published var satRecipe: String = SaturatorRecipe.classic.name
     /// Audio quality mode (persisted). Low = cheaper versions of the heaviest effects.
@@ -239,9 +239,9 @@ final class AppState: ObservableObject {
         // Shimmer/Depth cohesion: a little shared spectral blur and glue
         // whenever either is on, so the glow fuses with the music.
         let glow = max(effective("shimmer"), effective("depth"))
-        audio.setSpectralBlur(effective: max(effective("blur"), 0.3 * glow))
+        audio.setSpectralBlur(effective: effective("blur"))   // Spectral Scatter
         audio.setGlowGlue(Double(glow))
-        audio.setMelodyBlur(smear: effective("bsmear"), wash: effective("bwash"), soften: effective("bsoften"), distance: effective("bdist"), swell: effective("bswell"), diffuse: effective("bdiffuse"))
+        audio.setMelodyBlur(smear: effective("bsmear"), wash: effective("bwash"), swell: effective("bswell"), diffuse: effective("bdiffuse"), smoke: effective("bsmoke"), underwater: effective("bunder"))
         audio.setGrit(bits: effective("bits"), softClip: effective("softclip"), noise: effective("gnoise"), corpus: effective("corpus"), rattle: effective("rattle"))
         audio.setShimmer(effective: effective("shimmer"))
         audio.setTapeHysteresis(effective: effective("hyst"))

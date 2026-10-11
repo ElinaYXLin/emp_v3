@@ -78,10 +78,12 @@ final class AudioEngine {
     private let glowGlue         = GlowGlue()
     private let grit             = Grit()
     private let melodyBlur       = MelodyBlur()
+    private let smokeBlur        = SmokeBlur()
+    private let underwaterBlur   = UnderwaterBlur()
     private let bandEQ           = FourBandEQ()
     private let postTube         = PostTubeSaturator()
     private let resonanceTamer   = ResonanceTamer()
-    // Spectral haze: per-frequency level slew (see SpectralBlur.swift).
+    // Spectral haze: Spectral Scatter, a per-band spectral delay (see SpectralScatter.swift).
     private let spectralBlur     = SpectralBlur()
     // Temporal haze: octave-down feedback glow after the reverb (see Shimmer.swift).
     private let shimmer          = Shimmer()
@@ -369,6 +371,8 @@ final class AudioEngine {
         choir.process(left: l, right: r, count: n)
         // Blur section first (smear, wash, soften, distance), before the Effects page.
         melodyBlur.process(left: l, right: r, count: n)
+        smokeBlur.process(left: l, right: r, count: n)
+        underwaterBlur.process(left: l, right: r, count: n)
 
         // Effects page in EMP_V2's order: spectral haze → temporal haze →
         // color (Depth and its glue sit with Shimmer).
@@ -614,8 +618,12 @@ final class AudioEngine {
     /// Depth (undertones): effective 0–1 (see Depth.swift).
     func setDepth(effective eff: Float) { depth.setAmount(Double(eff)) }
     /// Blur section: effective 0–1 each.
-    func setMelodyBlur(smear: Float, wash: Float, soften: Float, distance: Float, swell: Float, diffuse: Float) {
-        melodyBlur.set(smear: Double(smear), wash: Double(wash), soften: Double(soften), distance: Double(distance), swell: Double(swell), diffuse: Double(diffuse))
+    /// Blur section: Smear, Wash, Swell (also softens attacks), Diffuse, Smoke, Underwater (effective 0–1 each).
+    func setMelodyBlur(smear: Float, wash: Float, swell: Float, diffuse: Float, smoke: Float, underwater: Float) {
+        melodyBlur.set(smear: Double(smear), wash: Double(wash), soften: Double(min(1, swell * 1.2)), distance: 0,
+                       swell: Double(swell), diffuse: Double(diffuse))
+        smokeBlur.setStrength(Double(smoke))
+        underwaterBlur.setStrength(Double(underwater))
     }
     /// Grit row: bit depth, soft clip, grain noise (effective 0–1 each).
     func setGrit(bits: Float, softClip: Float, noise: Float, corpus: Float, rattle: Float) {

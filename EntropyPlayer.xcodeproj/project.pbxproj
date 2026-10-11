@@ -34,9 +34,10 @@
 		AA2000000000000000000031 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000031 /* Session.swift */; };
 		AA2000000000000000000032 /* MelodyBlur.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000032 /* MelodyBlur.swift */; };
 		AA2000000000000000000033 /* ResonanceTamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000033 /* ResonanceTamer.swift */; };
+		AA2000000000000000000034 /* BlurEngines.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000034 /* BlurEngines.swift */; };
 		AA2000000000000000000021 /* SaturatorRecipes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000021 /* SaturatorRecipes.swift */; };
 		AA2000000000000000000020 /* Shimmer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000020 /* Shimmer.swift */; };
-		AA2000000000000000000019 /* SpectralBlur.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000019 /* SpectralBlur.swift */; };
+		AA2000000000000000000019 /* SpectralScatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000019 /* SpectralScatter.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -70,9 +71,10 @@
 		AA1000000000000000000031 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		AA1000000000000000000032 /* MelodyBlur.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MelodyBlur.swift; sourceTree = "<group>"; };
 		AA1000000000000000000033 /* ResonanceTamer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResonanceTamer.swift; sourceTree = "<group>"; };
+		AA1000000000000000000034 /* BlurEngines.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlurEngines.swift; sourceTree = "<group>"; };
 		AA1000000000000000000021 /* SaturatorRecipes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaturatorRecipes.swift; sourceTree = "<group>"; };
 		AA1000000000000000000020 /* Shimmer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shimmer.swift; sourceTree = "<group>"; };
-		AA1000000000000000000019 /* SpectralBlur.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpectralBlur.swift; sourceTree = "<group>"; };
+		AA1000000000000000000019 /* SpectralScatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpectralScatter.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -124,9 +126,10 @@
 				AA1000000000000000000031 /* Session.swift */,
 				AA1000000000000000000032 /* MelodyBlur.swift */,
 				AA1000000000000000000033 /* ResonanceTamer.swift */,
+				AA1000000000000000000034 /* BlurEngines.swift */,
 				AA1000000000000000000021 /* SaturatorRecipes.swift */,
 				AA1000000000000000000020 /* Shimmer.swift */,
-				AA1000000000000000000019 /* SpectralBlur.swift */,
+				AA1000000000000000000019 /* SpectralScatter.swift */,
 				AA1000000000000000000009 /* Info.plist */,
 				AA1000000000000000000010 /* EntropyPlayer.entitlements */,
 			);
@@ -236,9 +239,10 @@
 				AA2000000000000000000031 /* Session.swift in Sources */,
 				AA2000000000000000000032 /* MelodyBlur.swift in Sources */,
 				AA2000000000000000000033 /* ResonanceTamer.swift in Sources */,
+				AA2000000000000000000034 /* BlurEngines.swift in Sources */,
 				AA2000000000000000000021 /* SaturatorRecipes.swift in Sources */,
 				AA2000000000000000000020 /* Shimmer.swift in Sources */,
-				AA2000000000000000000019 /* SpectralBlur.swift in Sources */,
+				AA2000000000000000000019 /* SpectralScatter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

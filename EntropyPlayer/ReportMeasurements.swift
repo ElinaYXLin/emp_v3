@@ -35,6 +35,7 @@ struct ChainSettings {
     var postTube = 0.0
     var gritBits = 0.0, gritClip = 0.0, gritNoise = 0.0, gritCorpus = 0.0, gritRattle = 0.0
     var blurSmear = 0.0, blurWash = 0.0, blurSoften = 0.0, blurDistance = 0.0, blurSwell = 0.0, blurDiffuse = 0.0
+    var blurSmoke = 0.0, blurUnderwater = 0.0
     var choirVoices = 0.0, choirDetune = 0.0, choirDelay = 0.0, choirVibrato = 0.0
     var rolloff = 0.0
     var compressor = false
@@ -124,7 +125,8 @@ enum ReportMeasurer {
         let n = input.count
         let gd = GroupDelay(); gd.setScale(s.gdScale); gd.flushParameters()
         let bl = SpectralBlur(); bl.setStrength(s.blur)
-        let mb = MelodyBlur(); mb.set(smear: s.blurSmear, wash: s.blurWash, soften: s.blurSoften, distance: s.blurDistance, swell: s.blurSwell, diffuse: s.blurDiffuse)
+        let mb = MelodyBlur(); mb.set(smear: s.blurSmear, wash: s.blurWash, soften: min(1, s.blurSwell * 1.2), distance: 0, swell: s.blurSwell, diffuse: s.blurDiffuse)
+        let smk = SmokeBlur(); smk.setStrength(s.blurSmoke); let uw = UnderwaterBlur(); uw.setStrength(s.blurUnderwater)
         let gr = GrainEcho(); gr.setStrength(s.grain)
         let ch = Choir(); ch.setVoices(s.choirVoices); ch.setDetune(s.choirDetune)
         ch.setDelay(s.choirDelay); ch.setVibrato(s.choirVibrato)
@@ -140,6 +142,8 @@ enum ReportMeasurer {
                     let c = min(470, n - i), a = lb.baseAddress! + i, b = rb.baseAddress! + i
                     ch.process(left: a, right: b, count: c)
                     mb.process(left: a, right: b, count: c)
+                    smk.process(left: a, right: b, count: c)
+                    uw.process(left: a, right: b, count: c)
                     gd.process(left: a, right: b, count: c)
                     bl.process(left: a, right: b, count: c)
                     gr.process(left: a, right: b, count: c)

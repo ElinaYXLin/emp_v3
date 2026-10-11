@@ -8,8 +8,10 @@ import Accelerate
 // STFT (2048 Hann, hop 256). Per bin, the magnitude is smoothed over ~60 ms
 // (so only *sustained* peaks count, not transients) and compared with a
 // local spectral envelope: the mean power over ±⅓ octave. Where a bin stands
-// more than 5 dB above its surroundings (150 Hz–4 kHz), its gain is lowered by
-// 0.8 dB per dB of excess, up to −8 dB; gains glide (40 ms down, 300 ms back)
+// more than 5 dB above its surroundings (3.5 dB in 250–900 Hz, where stacked
+// effect copies ring on held vocal notes; range 150 Hz–4 kHz), its gain is
+// lowered by 0.8 dB per dB of excess, plus a cut that grows the longer the
+// peak persists (+8 dB/s), up to −12 dB; gains glide (40 ms down, 300 ms back)
 // and are smoothed across neighbouring bins. Only real gains are applied —
 // phases are untouched — so it can't add warble or stutter. With nothing
 // sticking out it is an exact pass-through (constant 2048-sample latency).
@@ -24,7 +26,7 @@ final class ResonanceTamer {
     private let fft = vDSP_create_fftsetup(ResonanceTamer.log2n, FFTRadix(kFFTRadix2))!
     private let window: UnsafeMutablePointer<Float>
     private let inBuf, accum, ready: [UnsafeMutablePointer<Float>]
-    private let smPow, gain: [UnsafeMutablePointer<Float>]     // per channel
+    private let smPow, gain, persist: [UnsafeMutablePointer<Float>]     // per channel
     private let frame, re, im, prefix, target: UnsafeMutablePointer<Float>
     private var fill = 0
 
@@ -39,12 +41,12 @@ final class ResonanceTamer {
         let n = Self.n, b = Self.bins
         window = buf(n); vDSP_hann_window(window, vDSP_Length(n), Int32(vDSP_HANN_DENORM))
         inBuf = [buf(n), buf(n)]; accum = [buf(n), buf(n)]; ready = [buf(Self.hop), buf(Self.hop)]
-        smPow = [buf(b), buf(b)]; gain = [buf(b, 1), buf(b, 1)]
+        smPow = [buf(b), buf(b)]; gain = [buf(b, 1), buf(b, 1)]; persist = [buf(b), buf(b)]
         frame = buf(n); re = buf(b); im = buf(b); prefix = buf(b + 1); target = buf(b, 1)
     }
     deinit {
         vDSP_destroy_fftsetup(fft)
-        (inBuf + accum + ready + smPow + gain + [window, frame, re, im, prefix, target]).forEach { $0.deallocate() }
+        (inBuf + accum + ready + smPow + gain + persist + [window, frame, re, im, prefix, target]).forEach { $0.deallocate() }
     }
 
     func process(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>?, count: Int) {
@@ -66,7 +68,8 @@ final class ResonanceTamer {
         frame.withMemoryRebound(to: DSPComplex.self, capacity: B) { vDSP_ctoz($0, 2, &split, 1, vDSP_Length(B)) }
         vDSP_fft_zrip(fft, &split, 1, Self.log2n, FFTDirection(kFFTDirection_Forward))
 
-        let P = smPow[ch], G = gain[ch]
+        let P = smPow[ch], G = gain[ch], PS = persist[ch]
+        let dt = Float(1 / Self.frameRate)
         let pC = Float(1 - exp(-1 / (0.060 * Self.frameRate)))
         let gDown = Float(1 - exp(-1 / (0.040 * Self.frameRate)))
         let gUp = Float(1 - exp(-1 / (0.300 * Self.frameRate)))
@@ -81,11 +84,21 @@ final class ResonanceTamer {
                 let w = max(3, Int(Float(k) * 0.26))
                 let lo = max(1, k - w), hi = min(B - 1, k + w)
                 let env = (prefix[hi + 1] - prefix[lo] - P[k]) / Float(hi - lo)
-                guard env > 1e-14 else { continue }
+                guard env > 1e-14 else { PS[k] = 0; continue }
                 let excessDb = 10 * log10f(P[k] / env)
-                if excessDb > 5 {
-                    let cutDb = min(8, (excessDb - 5) * 0.8)
+                // More sensitive where stacked effect copies pile up on held
+                // vocal notes (250–900 Hz).
+                let hz = Float(k) * 44100 / Float(N)
+                let thresh: Float = (hz > 250 && hz < 900) ? 3.5 : 5
+                if excessDb > thresh {
+                    // Persistence: the longer a narrow peak keeps sticking out
+                    // (a sustained note ringing), the deeper the cut grows
+                    // (+8 dB per second, up to −12 dB in total).
+                    PS[k] = min(2, PS[k] + dt)
+                    let cutDb = min(12, (excessDb - thresh) * 0.8 + PS[k] * 8)
                     target[k] = powf(10, -cutDb / 20)
+                } else {
+                    PS[k] = max(0, PS[k] - 2 * dt)
                 }
             }
         }
