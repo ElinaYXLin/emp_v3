@@ -83,6 +83,7 @@ final class SmokeBlur: BlurSTFT {
             let avg = (pre[hi + 1] - pre[lo]) / Float(hi - lo + 1)
             S[k] += (avg > S[k] ? a : rl) * (avg - S[k])
             P[k] += expect * Float(k) + 1.4 * gauss()
+            P[k] -= 2 * Float.pi * (P[k] / (2 * Float.pi)).rounded()
             // Fog replaces the live sound in proportion to strength.
             re[k] = re[k] * (1 - sm) + sm * S[k] * cosf(P[k]); im[k] = im[k] * (1 - sm) + sm * S[k] * sinf(P[k])
         }
@@ -111,6 +112,7 @@ final class UnderwaterBlur: BlurSTFT {
             let m = (re[k]*re[k] + im[k]*im[k]).squareRoot()
             S[k] += (m > S[k] ? atkC : relC) * (m - S[k])
             P[k] += expect * Float(k) + 0.3 * gauss()
+            P[k] -= 2 * Float.pi * (P[k] / (2 * Float.pi)).rounded()
             let out = S[k] * tilt
             let live = min(m, S[k]) * tilt / max(m, 1e-12)
             let e = max(0, out - m * tilt)

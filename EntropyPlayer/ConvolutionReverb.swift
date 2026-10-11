@@ -91,6 +91,16 @@ final class ConvolutionReverb {
     /// compensation). The post-tube reverb uses dry 1, wet by strength.
     private var dryGain: Float = 0.6, wetGain: Float = 0.8, outGain: Float = ConvolutionReverb.levelComp
     func setMix(dry: Float, wet: Float, out: Float) { lock.lock(); dryGain = dry; wetGain = wet; outGain = out; lock.unlock() }
+    /// Main reverb dial: 0 = fully off (dry only, exact bypass), fading up to
+    /// the full 0.6 dry / 0.8 wet mix by 15 % so the low end of the dial
+    /// doesn't jump. Without this the 0.8 wet path (with the style's
+    /// pre-delay and colour) stayed on at 0.
+    func setAmount(_ eff: Double) {
+        let w = Float(max(0, min(1, eff / 0.15)))
+        setMix(dry: 1 - 0.4 * w, wet: 0.8 * w, out: 1 + (Self.levelComp - 1) * w)
+    }
+    // Gains actually applied, ramped toward the targets each chunk (no zipper/clicks).
+    private var curDry: Float = 0.6, curWet: Float = 0.8, curOut: Float = ConvolutionReverb.levelComp
 
     func setDecay(_ decaySec: Double) {
         lastDecay = decaySec
@@ -168,8 +178,21 @@ final class ConvolutionReverb {
             } else {
                 convolver.process(left: l, right: r, count: n)     // → wet
             }
-            for i in 0..<n { l[i] = (dryL[i] * dG + l[i] * wG) * oG }
-            if let r { for i in 0..<n { r[i] = (dryR[i] * dG + r[i] * wG) * oG } }
+            let d0 = curDry, w0 = curWet, o0 = curOut, inv = 1 / Float(n)
+            curDry = dG; curWet = wG; curOut = oG
+            if d0 == 1 && w0 == 0 && o0 == 1 && dG == 1 && wG == 0 && oG == 1 {
+                // Fully off: exact dry signal (the convolver keeps running so
+                // turning it back up doesn't replay a stale tail).
+                l.assign(from: dryL, count: n)
+                if let r { r.assign(from: dryR, count: n) }
+            } else {
+                for i in 0..<n {
+                    let t = Float(i + 1) * inv
+                    let d = d0 + (dG - d0) * t, w = w0 + (wG - w0) * t, o = o0 + (oG - o0) * t
+                    l[i] = (dryL[i] * d + l[i] * w) * o
+                    if let r { r[i] = (dryR[i] * d + r[i] * w) * o }
+                }
+            }
             done += n
         }
     }

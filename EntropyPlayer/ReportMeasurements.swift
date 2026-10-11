@@ -132,7 +132,7 @@ enum ReportMeasurer {
         let gr = GrainEcho(); gr.setStrength(s.grain)
         let ch = Choir(); ch.setVoices(s.choirVoices); ch.setDetune(s.choirDetune)
         ch.setDelay(s.choirDelay); ch.setVibrato(s.choirVibrato)
-        let rv = ConvolutionReverb(); rv.setStyle(s.reverbStyle); rv.setDecay(s.reverbDecaySec)
+        let rv = ConvolutionReverb(); rv.setStyle(s.reverbStyle); rv.setDecay(s.reverbDecaySec); rv.setAmount(pow(s.reverbDecaySec / 60, 1 / 1.5))
         let sh = Shimmer(); sh.setStrength(s.shimmer)
         let dp = Depth(); dp.setAmount(s.depth)
         let gl = GlowGlue(); gl.setAmount(max(s.shimmer, s.depth))

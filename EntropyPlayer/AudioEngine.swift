@@ -523,6 +523,7 @@ final class AudioEngine {
     /// scales with the macro exactly the same way the web app's does.
     private var lastReverbDecay = -1.0
     func setReverb(effective eff: Float, skipUpdate: Bool = false) {
+        reverbFilter.setAmount(Double(eff))
         guard !skipUpdate else { return }
         let decaySec = Double(pow(eff, 1.5)) * 60
         // Rebuilding the impulse response is expensive; only do it when the
@@ -727,6 +728,9 @@ final class AudioEngine {
     private let captureRing = ResamplingRing()
     private var captureRate: Double = 44100
     private var captureChannels = 2
+    private var captureDevices: (input: AudioDeviceID, output: AudioDeviceID)?
+    private var rateListener: AudioObjectPropertyListenerBlock?
+    private var captureRestartWork: DispatchWorkItem?
     private var captureABL: UnsafeMutableAudioBufferListPointer?
     private static let maxCaptureFrames = 8192
     private var preampLinear: Float = 1
@@ -899,6 +903,8 @@ final class AudioEngine {
         isSystemCapture = true
         try check(AudioOutputUnitStart(inAU), "start input")
         try check(AudioOutputUnitStart(outAU), "start output")
+        captureDevices = (inputDeviceID, outputDeviceID)
+        addRateListeners()
 
         vizTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -911,7 +917,15 @@ final class AudioEngine {
                     NSLog("[EntropyPlayer] System-mode glitches in last minute: capture render failures=%d, oversized=%d, ring underruns=%d, overflows=%d, DSP overloads=%d",
                           self.captureRenderFailures, self.captureOversized, u, o, self.captureOverloads)
                 }
-                NSLog("[EntropyPlayer] System-mode peak DSP load last minute: %.0f%% of callback budget", self.captureMaxLoad * 100)
+                let inRate = self.captureDevices.map { self.nominalRate($0.input) } ?? 0
+                let outRate = self.captureDevices.map { self.nominalRate($0.output) } ?? 0
+                NSLog("[EntropyPlayer] System-mode health: peak DSP load %.0f%%, ring fill %.0f/4096, clock correction %+.3f%%, input %.0f Hz (captured at %.0f), output %.0f Hz",
+                      self.captureMaxLoad * 100, self.captureRing.fillLevel, self.captureRing.correction * 100,
+                      inRate, self.captureRate, outRate)
+                if inRate > 0, abs(inRate - self.captureRate) > 1, let d = self.captureDevices {
+                    NSLog("[EntropyPlayer] Input rate drifted from capture rate — restarting System capture")
+                    try? self.startSystemCapture(inputDeviceID: d.input, outputDeviceID: d.output)
+                }
                 self.captureRenderFailures = 0; self.captureOversized = 0
                 self.captureOverloads = 0; self.captureMaxLoad = 0
                 self.captureRing.underruns = 0; self.captureRing.overflows = 0
@@ -927,6 +941,7 @@ final class AudioEngine {
     }
 
     private func stopCaptureUnits() {
+        removeRateListeners()
         isSystemCapture = false
         vizTimer?.invalidate(); vizTimer = nil
         for au in [captureAU, outputAU].compactMap({ $0 }) {
@@ -940,6 +955,48 @@ final class AudioEngine {
             abl.unsafeMutablePointer.deallocate()
             captureABL = nil
         }
+    }
+
+    // Another app (a browser, Zoom, Audio MIDI Setup…) can switch BlackHole's
+    // or the output device's sample rate mid-session. The capture rate was
+    // only read at start, so the ring then resampled at the wrong ratio and
+    // ran dry or overfilled over and over — periodic pops and dropouts.
+    // Restart the capture session whenever either device's rate changes.
+    private static var rateAddr = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyNominalSampleRate,
+        mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+
+    private func addRateListeners() {
+        guard let devs = captureDevices else { return }
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            guard let self, self.isSystemCapture else { return }
+            self.captureRestartWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, self.isSystemCapture, let d = self.captureDevices else { return }
+                NSLog("[EntropyPlayer] Device sample rate changed — restarting System capture")
+                try? self.startSystemCapture(inputDeviceID: d.input, outputDeviceID: d.output)
+            }
+            self.captureRestartWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        }
+        rateListener = block
+        for dev in Set([devs.input, devs.output]) {
+            AudioObjectAddPropertyListenerBlock(dev, &Self.rateAddr, DispatchQueue.main, block)
+        }
+    }
+
+    private func removeRateListeners() {
+        guard let devs = captureDevices, let block = rateListener else { return }
+        for dev in Set([devs.input, devs.output]) {
+            AudioObjectRemovePropertyListenerBlock(dev, &Self.rateAddr, DispatchQueue.main, block)
+        }
+        rateListener = nil
+    }
+
+    private func nominalRate(_ dev: AudioDeviceID) -> Double {
+        var rate: Float64 = 0, sz = UInt32(MemoryLayout<Float64>.size)
+        AudioObjectGetPropertyData(dev, &Self.rateAddr, 0, nil, &sz, &rate)
+        return rate
     }
 
     // Realtime input thread.
@@ -1172,7 +1229,7 @@ final class JitterRing {
 // System-mode ring between two independent hardware clocks: the capture
 // device (BlackHole) writes at its rate, the output device reads at 44.1 kHz.
 // The reader resamples with 4-point Hermite interpolation at
-// captureRate/44100, nudged by up to ±0.5% according to how full the ring
+// captureRate/44100, nudged by up to ±2% according to how full the ring
 // is, so the fill level is held near `target` indefinitely — clock drift
 // between the devices is absorbed smoothly instead of eventually running
 // the ring dry or overfull (either of which is an audible pop). Both sides
@@ -1181,8 +1238,9 @@ final class JitterRing {
 final class ResamplingRing {
     private static let size = 1 << 17
     private static let target = 4096.0          // ~85–93 ms cushion
-    private static let maxCorrection = 0.005
+    private static let maxCorrection = 0.02
     private static let gain = 0.002             // ratio correction per unit of fill error
+    private static let integralGain = 0.00002   // per callback: absorbs any steady clock offset
 
     private let bufL = UnsafeMutablePointer<Float>.allocate(capacity: ResamplingRing.size)
     private let bufR = UnsafeMutablePointer<Float>.allocate(capacity: ResamplingRing.size)
@@ -1191,8 +1249,12 @@ final class ResamplingRing {
     private var fillAvg: Double = ResamplingRing.target
     private var priming = true
     private var resetPending = false
+    private var integral = 0.0                   // learned steady clock offset
     private let lock = NSLock()
     var underruns = 0, overflows = 0             // diagnostics
+    /// Smoothed fill (samples) and current rate correction, for logging.
+    var fillLevel: Double { fillAvg }
+    var correction: Double { integral }
 
     init() {
         bufL.initialize(repeating: 0, count: Self.size)
@@ -1229,7 +1291,7 @@ final class ResamplingRing {
               count: Int, baseRatio: Double) {
         lock.lock()
         let w = Double(writeIdx)
-        if resetPending { readPos = 0; priming = true; resetPending = false }
+        if resetPending { readPos = 0; priming = true; resetPending = false; integral = 0 }
         lock.unlock()
 
         var avail = w - readPos
@@ -1252,8 +1314,12 @@ final class ResamplingRing {
 
         // Smoothed fill level → gentle rate correction (≈1 s smoothing).
         fillAvg += 0.02 * (avail - fillAvg)
+        // Proportional term for quick nudges, integral term so a steady
+        // clock mismatch (e.g. BlackHole vs. headphones) settles at the
+        // target fill instead of slowly draining the cushion.
         let err = (fillAvg - Self.target) / Self.target
-        let ratio = baseRatio * (1 + max(-Self.maxCorrection, min(Self.maxCorrection, Self.gain * err)))
+        integral = max(-Self.maxCorrection, min(Self.maxCorrection, integral + Self.integralGain * err))
+        let ratio = baseRatio * (1 + max(-Self.maxCorrection, min(Self.maxCorrection, integral + Self.gain * err)))
 
         let mask = Self.size - 1
         var pos = readPos

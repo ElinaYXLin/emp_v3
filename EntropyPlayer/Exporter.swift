@@ -42,7 +42,7 @@ final class OfflineChain {
         gd.setScale(s.gdScale); gd.setRandomness(s.gdRandom); gd.flushParameters()
         bl.setStrength(s.blur); gr.setStrength(s.grain)
         ch.setVoices(s.choirVoices); ch.setDetune(s.choirDetune); ch.setDelay(s.choirDelay); ch.setVibrato(s.choirVibrato)
-        rv.setStyle(s.reverbStyle); rv.setDecay(s.reverbDecaySec); sh.setStrength(s.shimmer)
+        rv.setStyle(s.reverbStyle); rv.setDecay(s.reverbDecaySec); rv.setAmount(pow(s.reverbDecaySec / 60, 1 / 1.5)); sh.setStrength(s.shimmer)
         eq.setParameters(frequency: 150, q: 0.1, gainDb: s.eqDb)
         rs.configure(s.recipe, amount: (s.evenDb + s.oddDb) / 16)
         ev.setDrive(driveDb: min(24, s.evenDb * s.recipe.evenMul)); ev.setBias(s.recipe.bias); ev.setWobble(s.wobble)
