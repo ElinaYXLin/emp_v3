@@ -21,6 +21,11 @@ import Foundation
 // its delay (½ + (t + u)/2)·D ms (clamped ≥ 0), so the knobs scale the
 // wander live.
 //
+// Each voice also has its own saturator — a curve from a bank of eight, its
+// own bias (even/odd balance) and drive, fixed for the life of the player —
+// and the saturated voices are summed and pulled together by a gentle glue
+// compressor (2:1 above −20 dBFS, ≤ 6 dB) before joining the dry signal.
+//
 // Knobs (0…1): Voices (0–16 singers, the newest fading in continuously),
 // Detune (d up to ±35 cents), Delay (D up to 60 ms), Vibrato (up to ±40 cents).
 // Voices 0 is exactly dry. Dry + choir are power-matched so adding singers
@@ -42,6 +47,26 @@ final class Choir {
         var vibPhase = 0.0                                        // 0…1
         var lp = 0.0, delay = 0.0                                 // distance tone, current base delay (samples)
         var gl = 0.0, gr = 0.0
+        // Each voice's own saturator (fixed for the life of the player):
+        // a curve from the bank, a bias (sets its even/odd balance) and a
+        // drive, normalized to unity small-signal gain; plus a DC blocker.
+        var shape = 0, bias = 0.0, drive = 1.0, norm = 1.0, off = 0.0
+        var hpX = 0.0, hpY = 0.0
+    }
+
+    /// Bank of saturation curves (all odd-symmetric, |f| ≤ ~1); the bias
+    /// shifts each voice's operating point to make them asymmetric.
+    @inline(__always) static func curve(_ i: Int, _ u: Double) -> Double {
+        switch i {
+        case 0: return tanh(u)                                          // classic tube-ish
+        case 1: return u / (1 + u * u).squareRoot()                     // algebraic, softer knee
+        case 2: return 2 / Double.pi * atan(Double.pi / 2 * u)          // arctangent, long tail
+        case 3: let c = max(-1, min(1, u)); return 1.5 * (c - c * c * c / 3)   // cubic, hard-ish
+        case 4: return u >= 0 ? 1 - exp(-u) : -(1 - exp(u))             // exponential
+        case 5: return sin(max(-Double.pi / 2, min(Double.pi / 2, u)))  // sine fold, rounded
+        case 6: return u / (1 + abs(u))                                 // rational, very soft
+        default: return tanh(u + 0.15 * u * u * u)                      // steeper tanh, gritty
+        }
     }
 
     private let lock = NSLock()
@@ -54,6 +79,11 @@ final class Choir {
     private var w = 0
     private let v = UnsafeMutablePointer<Voice>.allocate(capacity: Choir.maxVoices)
     private var rng: UInt64 = 0xC401C401_5EED1234
+    // Wet bus for the saturated voices, then a gentle glue compressor.
+    private static let maxBlock = 16384
+    private let wetL = UnsafeMutablePointer<Double>.allocate(capacity: Choir.maxBlock)
+    private let wetR = UnsafeMutablePointer<Double>.allocate(capacity: Choir.maxBlock)
+    private var glueEnv = 0.0, glueGain = 1.0
 
     init() {
         line.initialize(repeating: 0, count: Self.lineSize)
@@ -70,11 +100,19 @@ final class Choir {
             x.segPos = rand() * Self.segment                      // stagger the switches
             x.phase = rand(); x.vibPhase = rand()
             x.delay = -1
+            // Saturator identity: shapes spread across voices, bias ±0.45,
+            // drive 1.5–5× (the choir runs at ~-12 dBFS, so this is gentle).
+            x.shape = (i * 5 + 3) % 8
+            x.bias = (rand() * 2 - 1) * 0.45
+            x.drive = 1.5 + 3.5 * rand()
+            x.off = Self.curve(x.shape, x.bias)
+            let slope = (Self.curve(x.shape, x.bias + 1e-4) - Self.curve(x.shape, x.bias - 1e-4)) / 2e-4
+            x.norm = 1 / max(slope * x.drive, 1e-6)
             v[i] = x
         }
     }
 
-    deinit { line.deallocate(); v.deallocate() }
+    deinit { line.deallocate(); v.deallocate(); wetL.deallocate(); wetR.deallocate() }
 
     private func rand() -> Double {
         rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17
@@ -88,7 +126,16 @@ final class Choir {
     /// Lo-Q: at most 6 singers.
     func setLowQuality(_ on: Bool) { lock.lock(); tLowQ = on; lock.unlock() }
 
-    func process(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>?, count: Int) {
+    func process(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>?, count total: Int) {
+        var done = 0
+        while done < total {
+            let c = min(Self.maxBlock, total - done)
+            processBlock(left: left + done, right: right.map { $0 + done }, count: c)
+            done += c
+        }
+    }
+
+    private func processBlock(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>?, count: Int) {
         lock.lock()
         let tv = tVoices, td = tDetune, tl = tDelay, tb = tVib
         maxActive = tLowQ ? 6 : Self.maxVoices
@@ -133,8 +180,12 @@ final class Choir {
             v[k] = x
         }
 
+        for i in 0..<count { wetL[i] = 0; wetR[i] = 0 }
+        let hpC = exp(-2 * Double.pi * 15 / sr)
         for k in 0..<active {
             var x = v[k]
+            let shp = x.shape, bias = x.bias, drv = x.drive, nrm = x.norm, off = x.off
+            var hx = x.hpX, hy = x.hpY
             let s = x.segPos / seg, e = 0.5 - 0.5 * cos(.pi * s)   // cosine glide over the segment
             let det = (x.tendDet + x.detFrom + (x.detTo - x.detFrom) * e) * dCents
             let delMs = max(0, (0.5 + 0.5 * (x.tendDel + x.delFrom + (x.delTo - x.delFrom) * e))) * dMs
@@ -172,17 +223,31 @@ final class Choir {
                 }
                 let y = tap(base + phase * W) * g1 + tap(base + p2 * W) * (1 - g1)
                 lp += lpc * (y - lp)
-                if k == 0 {
-                    left[i] = Float(Double(left[i]) * dryG + lp * gl)
-                    right?[i] = Float(Double(right![i]) * dryG + lp * gr)
-                } else {
-                    left[i] += Float(lp * gl)
-                    right?[i] += Float(lp * gr)
-                }
+                // This voice's own saturator (unity small-signal gain), DC-blocked.
+                let sat = (Self.curve(shp, lp * drv + bias) - off) * nrm
+                hy = hpC * (hy + sat - hx); hx = sat
+                wetL[i] += hy * gl
+                wetR[i] += hy * gr
                 wp = (wp + 1) & mask
             }
             x.phase = phase; x.vibPhase = vph; x.lp = lp; x.delay = base
+            x.hpX = hx; x.hpY = hy
             v[k] = x
+        }
+        if active > 0 {
+            // Gentle glue on the voice bus: stereo-linked, 2:1 above −20 dBFS,
+            // 20 ms attack / 250 ms release, at most 6 dB of reduction — it
+            // pulls the voices together without flattening the dynamics.
+            let gA = 1 - exp(-1 / (0.020 * sr)), gR = 1 - exp(-1 / (0.250 * sr))
+            let thr = 0.1
+            for i in 0..<count {
+                let a = max(abs(wetL[i]), abs(wetR[i]))
+                glueEnv += (a > glueEnv ? gA : gR) * (a - glueEnv)
+                let want = glueEnv > thr ? max(0.5, (thr * (glueEnv / thr).squareRoot()) / glueEnv) : 1
+                glueGain += (want < glueGain ? gA : gR) * (want - glueGain)
+                left[i] = Float(Double(left[i]) * dryG + wetL[i] * glueGain)
+                if let r = right { r[i] = Float(Double(r[i]) * dryG + wetR[i] * glueGain) }
+            }
         }
         if active == 0 {
             for i in 0..<count { line[(w + i) & mask] = right.map { (left[i] + $0[i]) * 0.5 } ?? left[i] }

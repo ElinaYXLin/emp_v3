@@ -358,8 +358,12 @@ final class MelodyBlur {
                 // Live (smeared/swelled) part with its own phase, plus the
                 // Wash cloud added on top: average spectrum, lightly smoothed
                 // across neighbouring bins, with its noise-like phases.
-                let live = tgt[k] * (1 - wa)
-                let cloud = wa > 1e-4 ? wa * (0.25 * A[max(1, k - 1)] + 0.5 * A[k] + 0.25 * A[min(B - 1, k + 1)]) : 0
+                // The cloud takes over sooner (at 50 % it's ~¾ cloud), and is
+                // boosted ×2: its noise-like phases add incoherently across the
+                // 8 overlapping frames, which left it ~6 dB quieter than live.
+                let keep = (1 - wa) * (1 - wa)
+                let live = tgt[k] * keep
+                let cloud = wa > 1e-4 ? (1 - keep) * 2.0 * (0.25 * A[max(1, k - 1)] + 0.5 * A[k] + 0.25 * A[min(B - 1, k + 1)]) : 0
                 re[k] = live * cosf(ph) + cloud * cosf(WP[k])
                 im[k] = live * sinf(ph) + cloud * sinf(WP[k])
             }
