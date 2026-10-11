@@ -36,6 +36,7 @@ struct ChainSettings {
     var gritBits = 0.0, gritClip = 0.0, gritNoise = 0.0, gritCorpus = 0.0, gritRattle = 0.0
     var blurSmear = 0.0, blurWash = 0.0, blurSoften = 0.0, blurDistance = 0.0, blurSwell = 0.0, blurDiffuse = 0.0
     var blurSmoke = 0.0, blurUnderwater = 0.0
+    var reverbStyle = "Dark Room", postReverb = 0.0
     var choirVoices = 0.0, choirDetune = 0.0, choirDelay = 0.0, choirVibrato = 0.0
     var rolloff = 0.0
     var compressor = false
@@ -131,7 +132,7 @@ enum ReportMeasurer {
         let gr = GrainEcho(); gr.setStrength(s.grain)
         let ch = Choir(); ch.setVoices(s.choirVoices); ch.setDetune(s.choirDetune)
         ch.setDelay(s.choirDelay); ch.setVibrato(s.choirVibrato)
-        let rv = ConvolutionReverb(); rv.setDecay(s.reverbDecaySec)
+        let rv = ConvolutionReverb(); rv.setStyle(s.reverbStyle); rv.setDecay(s.reverbDecaySec)
         let sh = Shimmer(); sh.setStrength(s.shimmer)
         let dp = Depth(); dp.setAmount(s.depth)
         let gl = GlowGlue(); gl.setAmount(max(s.shimmer, s.depth))

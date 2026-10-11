@@ -63,7 +63,37 @@ final class ConvolutionReverb {
 
     /// decaySec matches the web app's `Math.pow(eff, 1.5) * 60` exactly (capped
     /// here for real-time safety instead of the web app's 10s memory cap).
+    /// Reverb character: brightness at the start/end of the tail, pre-delay
+    /// and "bloom" (a slow fade-in of the tail, so it swells rather than hits).
+    struct Style {
+        let name: String, blurb: String
+        let fStart: Double, fEnd: Double, preDelayMs: Double, bloomMs: Double
+        static let all: [Style] = [
+            .init(name: "Dark Room", blurb: "close and soft, darkening as it fades", fStart: 7000, fEnd: 1200, preDelayMs: 0, bloomMs: 0),
+            .init(name: "Hall", blurb: "open and airy, a little gap before the tail", fStart: 9000, fEnd: 2500, preDelayMs: 25, bloomMs: 40),
+            .init(name: "Plate", blurb: "bright, dense, instant shimmer", fStart: 12000, fEnd: 6000, preDelayMs: 0, bloomMs: 0),
+            .init(name: "Cathedral", blurb: "huge and dark, the tail swells in", fStart: 5000, fEnd: 800, preDelayMs: 40, bloomMs: 250),
+            .init(name: "Memory Fog", blurb: "very dark, slow-blooming haze", fStart: 3000, fEnd: 600, preDelayMs: 80, bloomMs: 600),
+            .init(name: "Tunnel", blurb: "a long gap, then a mid-bright wash", fStart: 6000, fEnd: 3000, preDelayMs: 120, bloomMs: 0),
+        ]
+        static func named(_ n: String) -> Style { all.first { $0.name == n } ?? all[0] }
+    }
+    private var style = Style.all[0]
+    private var lastDecay = -1.0
+    func setStyle(_ name: String) {
+        let st = Style.named(name)
+        guard st.name != style.name else { return }
+        style = st
+        if lastDecay >= 0 { setDecay(lastDecay) }
+    }
+
+    /// Dry/wet mix (defaults: the web edition's 0.6 dry / 0.8 wet, with level
+    /// compensation). The post-tube reverb uses dry 1, wet by strength.
+    private var dryGain: Float = 0.6, wetGain: Float = 0.8, outGain: Float = ConvolutionReverb.levelComp
+    func setMix(dry: Float, wet: Float, out: Float) { lock.lock(); dryGain = dry; wetGain = wet; outGain = out; lock.unlock() }
+
     func setDecay(_ decaySec: Double) {
+        lastDecay = decaySec
         let sr = sampleRate
         let floorSec = max(decaySec, 0.05)
         let rawLen   = max(Int(ceil(sr * floorSec)), Int(sr * 0.05))
@@ -74,19 +104,22 @@ final class ConvolutionReverb {
         // by the end of the decay, so the reverb loses its highs as it fades
         // (as real rooms do — air and soft surfaces absorb treble fastest)
         // instead of ringing out as bright white-noise hiss.
-        let fStart = 7000.0, fEnd = 1200.0
-        var irL = [Float](repeating: 0, count: capped)
-        var irR = [Float](repeating: 0, count: capped)
+        let fStart = style.fStart, fEnd = style.fEnd
+        let pre = Int(style.preDelayMs / 1000 * sr), bloom = max(1, style.bloomMs / 1000 * sr)
+        let total = min(Int(sr * Self.maxIRSeconds), capped + pre)
+        var irL = [Float](repeating: 0, count: total)
+        var irR = [Float](repeating: 0, count: total)
         var lpL = 0.0, lpR = 0.0
-        for i in 0..<capped {
+        for j in pre..<total {
+            let i = j - pre
             let t   = Double(i) / (sr * floorSec)
-            let env = exp(-3.0 * t)
+            let env = exp(-3.0 * t) * (style.bloomMs > 0 ? 1 - exp(-Double(i) / bloom) : 1)
             let fc  = fStart * pow(fEnd / fStart, min(t, 1))
             let a   = 1 - exp(-2 * Double.pi * fc / sr)
             lpL += a * (Double.random(in: -1...1) - lpL)
             lpR += a * (Double.random(in: -1...1) - lpR)
-            irL[i] = Float(lpL * env)
-            irR[i] = Float(lpR * env)
+            irL[j] = Float(lpL * env)
+            irR[j] = Float(lpR * env)
         }
 
         // Web Audio's ConvolverNode normalizes the impulse response's energy
@@ -126,7 +159,7 @@ final class ConvolutionReverb {
             let l = left + done, r = right.map { $0 + done }
             dryL.assign(from: l, count: n)
             if let r { dryR.assign(from: r, count: n) }
-            lock.lock(); let low = lowQualityFlag; lock.unlock()
+            lock.lock(); let low = lowQualityFlag, dG = dryGain, wG = wetGain, oG = outGain; lock.unlock()
             if low {
                 for i in 0..<n { mid[i] = (l[i] + (r?[i] ?? l[i])) * 0.5 }
                 lowConvolver.process(left: mid, right: nil, count: n)   // → mono wet
@@ -135,8 +168,8 @@ final class ConvolutionReverb {
             } else {
                 convolver.process(left: l, right: r, count: n)     // → wet
             }
-            for i in 0..<n { l[i] = (dryL[i] * 0.6 + l[i] * 0.8) * Self.levelComp }
-            if let r { for i in 0..<n { r[i] = (dryR[i] * 0.6 + r[i] * 0.8) * Self.levelComp } }
+            for i in 0..<n { l[i] = (dryL[i] * dG + l[i] * wG) * oG }
+            if let r { for i in 0..<n { r[i] = (dryR[i] * dG + r[i] * wG) * oG } }
             done += n
         }
     }

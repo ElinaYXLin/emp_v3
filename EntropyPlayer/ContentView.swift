@@ -498,8 +498,7 @@ struct ContentView: View {
                             display: { "\(Int($0))%" })
                     knobRow(key: "reverb",  label: "Reverb",     sub: "Decay time",
                             display: { String(format: "%.1fs", pow($0/100, 2) * 20) })
-                    knobRow(key: "grain",   label: "Grain Echo", sub: "Memory",
-                            display: { String(format: "%.0fms", $0/100*200) })
+                    reverbStylePicker
                 }
                 VStack(alignment: .leading, spacing: 16) {
                     knobGroup("Spectral Haze") {
@@ -575,12 +574,33 @@ struct ContentView: View {
                     knobGroup("Body") {
                         knobRow(key: "corpus", label: "Corpus", sub: "Wood body",
                                 display: { "\(Int($0))%" })
+                        knobRow(key: "grain", label: "Grain Echo", sub: "Memory",
+                                display: { String(format: "%.0fms", $0/100*200) })
                     }
                 }
             }
             .padding(mini ? 10 : 14)
         }
         .frame(width: width, alignment: .leading)
+    }
+
+    /// Reverb character, under the Reverb knob (also used by the post reverb).
+    var reverbStylePicker: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Picker("", selection: Binding(get: { app.reverbStyle }, set: { app.reverbStyle = $0 })) {
+                ForEach(ConvolutionReverb.Style.all, id: \.name) { st in Text(st.name).tag(st.name) }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: mini ? 70 : 150)
+            if !mini {
+                Text(ConvolutionReverb.Style.named(app.reverbStyle).blurb)
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundColor(Color(hex: "#8f8778"))
+                    .lineLimit(2)
+                    .frame(width: 150, alignment: .leading)
+            }
+        }
     }
 
     var recipesBox: some View {
@@ -754,6 +774,11 @@ struct ContentView: View {
                              symbol: "slider.vertical.3")
                 }
                 Divider().padding(.vertical, 2)
+                KnobView(label: "Reverb", sublabel: "After tube",
+                         value: Binding(get: { app.postReverb }, set: { app.postReverb = $0 }),
+                         display: { v in v < 0.5 ? "off" : String(format: "%.1f s", 0.6 + 2.4 * v / 100) },
+                         symbol: "building.columns")
+                    .help("Post reverb: adds the selected reverb style to the finished sound, after the final Tube saturator.")
                 KnobView(label: "Tube", sublabel: SaturatorRecipe.named(app.satRecipe).name,
                          value: Binding(get: { app.postTube }, set: { app.postTube = $0 }),
                          display: { v in v < 0.5 ? "off" : String(format: "%.1f dB",

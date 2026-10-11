@@ -49,7 +49,8 @@ Every effect control is a glass **cylinder** that fills (grey → orange) as you
 Other controls:
 
 - **4-band EQ** (a column of knobs between Macro and Post-Gain, highs on top): High >2 kHz, High-Mid 500 Hz–2 kHz, Mid 100–500 Hz, Low <100 Hz, ±12 dB each; 12 o’clock is 0 dB. Remembered between launches.
-- **Tube** knob (under the EQ): a second tube (even) saturator after the EQ, voiced by the recipe selected under Saturator Recipes; the knob sets its drive (0–18 dB) and 0 is fully bypassed.
+- **Reverb** knob (between the EQ and Tube): adds the selected reverb style to the finished sound, after the final Tube saturator (0.6 → 3 s).
+- **Tube** knob (under the EQ): a tube compressor + saturator after the EQ, like a vintage valve compressor. An opto-style compressor (threshold 4 dB above the music's own level, 1.3–3:1, fast/slow two-stage release) glues the level, then a tube stage voiced by the selected Saturator Recipe adds harmonics. Both are level-independent, so they act the same however much Post-Gain you use; 0 is fully bypassed.
 - **Pre-Amp** and **Post-Gain** sliders: input trim and clean output volume (Post-Gain goes up to +48 dB; the output ceiling still catches peaks).
 - **Limiter / Compressor**: the final dynamics stage, with an always-on safety ceiling after it. Just before it, a 24 dB/oct high-pass at 25 Hz removes sub-bass pumping (1–2 Hz wobble, woofer rattle).
 - **FX presets**: 40 presets for the Effects page, grouped by vibe (Nostalgic, Calming, Inspiring, Dreamy, Playful), plus **INIT**. They set every Effects-page knob, the saturator recipe, the post Tube amount and the macro, and leave the Emulation page alone. Their saturation was tuned by simulation so bass never distorts much more than the mids.
@@ -83,7 +84,7 @@ Signal flow: **Choir → Blur → Spectral Haze → Temporal Haze (Grain Echo �
 **Temporal Haze**
 | Knob | What it does |
 |---|---|
-| Reverb | Convolution reverb with a tail that darkens as it decays; the knob is quadratic for fine control |
+| Reverb | Convolution reverb; the knob is quadratic for fine control. A dropdown picks its character: Dark Room, Hall, Plate, Cathedral, Memory Fog or Tunnel |
 | Shimmer | Octave-down (f/2) feedback glow under the music, arriving ~12 ms after the note |
 | Depth | Shimmer's engine pitched further down: a glow of undertones f/3, f/4 … f/8 (Shimmer itself is f/2), high-passed at 25 Hz. The undertones cascade in time: f/3 arrives ~18 ms after the note, down to f/8 at 50 ms. The knob fades the undertones in one at a time; 0 is the original note only |
 | Grain Echo | Short detuned grains replayed from the last ≤200 ms, like music echoing from memory |
@@ -108,7 +109,7 @@ Signal flow: **Choir → Blur → Spectral Haze → Temporal Haze (Grain Echo �
 **Blur** (bottom row, left): for when you don't want to follow the melody
 | Knob | What it does |
 |---|---|
-| Smear | Notes melt into their neighbours (smoothed across pitch and up to 300 ms in time); pitch stays intact |
+| Smear | A dense, short, slowly moving diffusion (0.15 → 1 s) so notes melt into each other, with no spectral processing |
 | Wash | The melody dissolves into a wide, pitched cloud of the last ~1.5 s of harmony |
 | Smoke | Blurs across pitch and time into textured, pitchless fog |
 | Underwater | Dark and muffled: lows linger for seconds, highs fade fast and bloom in slowly, treble dipped up to 8 dB |

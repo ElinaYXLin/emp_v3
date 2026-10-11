@@ -57,6 +57,14 @@ final class AppState: ObservableObject {
             audio.setPostTube(amount: postTube / 100, recipe: SaturatorRecipe.named(satRecipe))
         }
     }
+    /// Reverb character (both reverbs), persisted.
+    @Published var reverbStyle: String = UserDefaults.standard.string(forKey: "reverb.style") ?? "Dark Room" {
+        didSet { UserDefaults.standard.set(reverbStyle, forKey: "reverb.style"); audio.setReverbStyle(reverbStyle) }
+    }
+    /// Post reverb after the final Tube (0–100), persisted.
+    @Published var postReverb: Double = UserDefaults.standard.double(forKey: "postReverb") {
+        didSet { UserDefaults.standard.set(postReverb, forKey: "postReverb"); audio.setPostReverb(amount: postReverb / 100) }
+    }
     @Published var lowQuality: Bool = UserDefaults.standard.bool(forKey: "quality.low") {
         didSet {
             UserDefaults.standard.set(lowQuality, forKey: "quality.low")
@@ -128,6 +136,8 @@ final class AppState: ObservableObject {
         audio.setPlaybackOutputDevice(selectedOutputDeviceID)
         audio.setBandEQ(db: bandEQ)
         audio.setPostTube(amount: postTube / 100, recipe: SaturatorRecipe.named(satRecipe))
+        audio.setReverbStyle(reverbStyle)
+        audio.setPostReverb(amount: postReverb / 100)
 
         // Come back exactly as the user left it (Post-Gain 6 dB lower), then
         // keep the saved session up to date.

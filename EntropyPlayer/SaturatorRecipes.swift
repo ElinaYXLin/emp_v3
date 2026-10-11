@@ -229,8 +229,9 @@ final class RecipeStage {
 
 // MARK: - Post tube saturator
 
-// A second tube (even) saturator after the 4-band EQ, voiced by the same
-// recipe as the Color stage (emphasis EQ, tube bias, harmonic recipe). The
+// A tube compressor + saturator after the 4-band EQ (like a vintage valve
+// compressor: an opto-style compressor controls the level, then the tube
+// stage adds its harmonics), voiced by the same recipe as the Color stage (emphasis EQ, tube bias, harmonic recipe). The
 // knob sets the drive (0–18 dB × the recipe's even multiplier); the first
 // quarter of its travel also fades the stage in from fully dry, so 0 is
 // exactly bypassed and turning it up never jumps. Runs inside the same
@@ -241,6 +242,18 @@ final class PostTubeSaturator {
     private let drive = Float(pow(10, 7.0 / 20))
     private let lock = NSLock()
     private var targetMix = 0.0, mix = 0.0
+    private var amount = 0.0
+    // Tube compressor (opto-style, ahead of the saturation): stereo-linked,
+    // ratio 1.3 → 3:1 with the knob, threshold −18 dBFS, 10 ms attack and a
+    // two-stage release (fast 80 ms for short peaks, slow 1.5 s for sustained
+    // loudness — glue without pumping), half the average reduction made up.
+    private var compEnv = 0.0, fastRel = 1.0, slowRel = 1.0, avgGR = 1.0
+    // Level independence: EMP often runs 20–30 dB below full scale here (the
+    // user's Post-Gain comes after), so fixed thresholds never engage. A slow
+    // (3 s) level tracker sets the compressor threshold 4 dB above the music's
+    // own average, and brings the signal to a −18 dBFS reference for the tube
+    // (undone after), so both act the same at any listening level.
+    private var longRMS = 0.01
     private let dryL = UnsafeMutablePointer<Float>.allocate(capacity: 4096)
     private let dryR = UnsafeMutablePointer<Float>.allocate(capacity: 4096)
 
@@ -253,19 +266,43 @@ final class PostTubeSaturator {
         stage.configure(r, amount: driveDb / 16)
         sat.setDrive(driveDb: driveDb)
         sat.setBias(r.bias)
-        lock.lock(); targetMix = min(1, a * 4); lock.unlock()
+        lock.lock(); targetMix = min(1, a * 4); self.amount = a; lock.unlock()
     }
 
     func setLowQuality(_ on: Bool) { sat.setLowQuality(on); stage.setLowQuality(on) }
 
     func process(left l: UnsafeMutablePointer<Float>, right r: UnsafeMutablePointer<Float>, count n: Int) {
-        lock.lock(); let t = targetMix; lock.unlock()
+        lock.lock(); let t = targetMix, amt = amount; lock.unlock()
         if t == 0 && mix < 1e-4 { mix = 0; return }
         var off = 0
         while off < n {
             let c = min(4096, n - off), a = l + off, b = r + off
             dryL.assign(from: a, count: c); dryR.assign(from: b, count: c)
-            for i in 0..<c { a[i] *= drive; b[i] *= drive }
+            // Tube compressor first; threshold 4 dB above the music's own level.
+            let rmsC = 1 - exp(-1 / (3.0 * 44100.0))
+            let ratio = 1.3 + 1.7 * amt
+            let atk = 1 - exp(-1 / (0.010 * 44100.0))
+            let fR = 1 - exp(-1 / (0.080 * 44100.0)), sR = 1 - exp(-1 / (1.5 * 44100.0))
+            let avgC = 1 - exp(-1 / (3.0 * 44100.0))
+            for i in 0..<c {
+                let lvl = Double(max(abs(a[i]), abs(b[i])))
+                longRMS += rmsC * (Double(a[i] * a[i] + b[i] * b[i]) * 0.5 - longRMS)
+                let thr = max(1e-5, longRMS.squareRoot() * 1.585 * 1.414)       // avg RMS +4 dB, as a peak level
+                compEnv += (lvl > compEnv ? atk : fR) * (lvl - compEnv)
+                let want = compEnv > thr ? pow(compEnv / thr, 1 / ratio - 1) : 1
+                // Two-stage opto release: the fast stage recovers quickly from
+                // short peaks, the slow one holds back sustained loudness.
+                fastRel = want < fastRel ? want : fastRel + fR * (want - fastRel)
+                slowRel = want < slowRel ? slowRel + atk * 0.2 * (want - slowRel) : slowRel + sR * (want - slowRel)
+                let gr = min(fastRel, slowRel)                            // the stage reducing more wins
+                avgGR += avgC * (gr - avgGR)
+                let gain = Float(gr / max(avgGR.squareRoot(), 0.5))       // makeup: half the average GR (in dB)
+                a[i] *= gain; b[i] *= gain
+            }
+            // Bring the music to a −18 dBFS reference for the tube, undo after.
+            let ref = Float(0.126 / max(longRMS.squareRoot(), 1e-5))
+            let level = min(ref, 100)                                   // at most +40 dB
+            for i in 0..<c { a[i] *= drive * level; b[i] *= drive * level }
             for ch in 0..<2 {
                 let q = ch == 0 ? a : b
                 stage.pre(q, count: c, channel: ch)
@@ -276,8 +313,8 @@ final class PostTubeSaturator {
             for i in 0..<c {
                 mix += step
                 let w = Float(mix)
-                a[i] = dryL[i] + (a[i] / drive - dryL[i]) * w
-                b[i] = dryR[i] + (b[i] / drive - dryR[i]) * w
+                a[i] = dryL[i] + (a[i] / (drive * level) - dryL[i]) * w
+                b[i] = dryR[i] + (b[i] / (drive * level) - dryR[i]) * w
             }
             off += c
         }

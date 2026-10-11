@@ -120,38 +120,85 @@ final class UnderwaterBlur: BlurSTFT {
     override func idle(_ ch: Int) { for k in 1..<1024 { st[ch][k] = (re[k]*re[k] + im[k]*im[k]).squareRoot() } }
 }
 
-// Smear: time-only linger — no averaging across neighbouring
-// frequencies. Each bin's level lingers (40 ms in, 300 ms out); the live
-// sound passes untouched and only the lingering extra is added, spinning at
-// its tracked true pitch (frequency-locked to the nearest lingering peak)
-// with a tiny drift. Notes melt into each other without phaser smear.
-final class SmearBlur: BlurSTFT {
-    let st = [BlurSTFT.buf(1024), BlurSTFT.buf(1024)], pp = [BlurSTFT.buf(1024), BlurSTFT.buf(1024)]
-    let fq = [BlurSTFT.buf(1024), BlurSTFT.buf(1024)], ph = [BlurSTFT.buf(1024), BlurSTFT.buf(1024)]
-    let mg = BlurSTFT.buf(1024)
-    let peak = UnsafeMutablePointer<Int>.allocate(capacity: 1024)
-    override init() { super.init(); for c in 0..<2 { for k in 0..<1024 { fq[c][k] = Float(k) } } }
-    override func spectrum(_ ch: Int) {
-        let S = st[ch], PP = pp[ch], F = fq[ch], P = ph[ch], s = strength
-        let a = coef(Double(0.01 + 0.04 * s)), rl = coef(Double(0.05 + 0.85 * s)), fc = coef(0.15)
-        let twoPi = 2 * Float.pi, expect = twoPi * 256 / 2048
-        for k in 1..<1024 {
-            let m = (re[k]*re[k] + im[k]*im[k]).squareRoot(); let lph = atan2f(im[k], re[k])
-            var d = lph - PP[k] - expect * Float(k); d -= twoPi * (d / twoPi).rounded(); PP[k] = lph
-            F[k] += fc * min(1, m / max(S[k], 1e-9)) * (Float(k) + d / expect - F[k])
-            S[k] += (m > S[k] ? a : rl) * (m - S[k]); mg[k] = m
-        }
-        var last = 1; for k in 1..<1024 { if k == 1 || k == 1023 || (S[k] >= S[k-1] && S[k] >= S[k+1]) { last = k }; peak[k] = last }
-        var nx = 1023, k = 1023; while k >= 1 { if k == 1 || k == 1023 || (S[k] >= S[k-1] && S[k] >= S[k+1]) { nx = k }; if nx - k < k - peak[k] { peak[k] = nx }; k -= 1 }
-        for k in 1..<1024 {
-            P[k] += expect * F[peak[k]] + 0.04 * gauss(); P[k] -= twoPi * (P[k] / twoPi).rounded()
-            let e = max(0, S[k] - mg[k]) * s * 1.8
-            re[k] += e * cosf(P[k]); im[k] += e * sinf(P[k])
+// Smear: a dense, short, slowly moving diffusion network — no spectral
+// processing (the STFT versions resynthesized lingering energy as steady
+// tones, which sounded like a spectral resonator). Input diffusion (two
+// allpasses) feeds an 8-line feedback delay network (9–45 ms lines, Hadamard
+// mixing, each line's delay swaying a few samples at its own slow rate, a
+// 6 kHz damping filter in the loop). Its tail is 0.15 → 1.0 s with strength,
+// so notes melt into each other as a soft smear; modulation keeps any
+// resonance from settling. Added on top of the dry sound; strength 0 is
+// exactly dry. Stereo out from different line taps.
+final class SmearBlur {
+    private static let sr = 44100.0
+    private static let lens = [397, 523, 677, 811, 953, 1103, 1289, 1499]
+    private static let size = 2048
+    private let lock = NSLock()
+    private var target = 0.0, strength = 0.0
+    private let lines = UnsafeMutablePointer<Float>.allocate(capacity: 8 * SmearBlur.size)
+    private var w = 0
+    private var lp = [Float](repeating: 0, count: 8)
+    private var modPh: [Double] = (0..<8).map { Double($0) * 0.77 }
+    private let modRate: [Double] = (0..<8).map { 0.11 + 0.07 * Double($0) }
+    private let ap = UnsafeMutablePointer<Float>.allocate(capacity: 2 * 512)
+    private var apW = 0
+    private let x = UnsafeMutablePointer<Float>.allocate(capacity: 8)    // line outputs
+    private let h = UnsafeMutablePointer<Float>.allocate(capacity: 8)    // Hadamard scratch
+
+    init() {
+        lines.initialize(repeating: 0, count: 8 * Self.size)
+        ap.initialize(repeating: 0, count: 2 * 512)
+        x.initialize(repeating: 0, count: 8); h.initialize(repeating: 0, count: 8)
+    }
+    deinit { lines.deallocate(); ap.deallocate(); x.deallocate(); h.deallocate() }
+
+    func setStrength(_ s: Double) { lock.lock(); target = max(0, min(1, s)); lock.unlock() }
+
+    func process(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>, count: Int) {
+        lock.lock(); let t = target; lock.unlock()
+        if t == 0 && strength < 1e-4 { strength = 0; return }
+        strength += (t - strength) * (1 - exp(-Double(count) / (0.05 * Self.sr)))
+        let s = strength
+        let rt60 = 0.15 + 0.85 * s
+        let meanLen = 900.0
+        let g = Float(pow(10, -3 * meanLen / (rt60 * Self.sr)))      // per-trip feedback for the RT60
+        let damp = Float(1 - exp(-2 * Double.pi * 6000 / Self.sr))
+        let wet = Float(0.9 * s), dry = Float(1 - 0.3 * s)
+        let mask = Self.size - 1
+        for i in 0..<count {
+            // Input: mono, through two short diffusion allpasses.
+            var v = (left[i] + right[i]) * 0.5
+            for (k, len) in [(0, 113), (1, 337)] {
+                let base = k * 512, d = ap[base + ((apW - len) & 511)]
+                let ww = v + 0.6 * d; ap[base + (apW & 511)] = ww; v = d - 0.6 * ww
+            }
+            apW = (apW + 1) & 511
+            // Read the 8 lines (modulated), damp.
+            for k in 0..<8 {
+                modPh[k] += modRate[k] / Self.sr; if modPh[k] > 1 { modPh[k] -= 1 }
+                let d = Double(Self.lens[k]) + 6 * sin(2 * Double.pi * modPh[k])
+                let pos = Double(w) - d, fl = pos.rounded(.down), fr = Float(pos - fl)
+                let i0 = Int(fl) & mask, i1 = (i0 + 1) & mask
+                let a = lines[k * Self.size + i0], b = lines[k * Self.size + i1]
+                lp[k] += damp * ((a + (b - a) * fr) - lp[k])
+                x[k] = lp[k]
+            }
+            // Hadamard 8×8 (fast), scaled to stay energy-preserving.
+            for k in 0..<8 { h[k] = x[k] }
+            var span = 1
+            while span < 8 {
+                var j = 0
+                while j < 8 { for q in j..<(j + span) { let u = h[q], z = h[q + span]; h[q] = u + z; h[q + span] = u - z }; j += span * 2 }
+                span *= 2
+            }
+            for k in 0..<8 { lines[k * Self.size + w] = v * 0.35 + h[k] * 0.35355 * g }
+            w = (w + 1) & mask
+            let outL = (x[0] - x[2] + x[4] - x[6]) * 0.5, outR = (x[1] - x[3] + x[5] - x[7]) * 0.5
+            left[i] = left[i] * dry + outL * wet
+            right[i] = right[i] * dry + outR * wet
         }
     }
-    override func idle(_ ch: Int) { for k in 1..<1024 { st[ch][k] = (re[k]*re[k] + im[k]*im[k]).squareRoot(); ph[ch][k] = atan2f(im[k], re[k]) } }
 }
-
 
 // Swell: no spectral processing at all. Eight bands split by
 // subtraction (they sum back exactly); in each, attacks are slowed by the

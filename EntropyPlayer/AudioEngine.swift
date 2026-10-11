@@ -85,6 +85,9 @@ final class AudioEngine {
     private let bandEQ           = FourBandEQ()
     private let postTube         = PostTubeSaturator()
     private let resonanceTamer   = ResonanceTamer()
+    // Post reverb: after the final Tube saturator, on the finished sound.
+    private let postReverb       = ConvolutionReverb()
+    private var postReverbOn = false, lastPostDecay = -1.0
     // Spectral haze: Spectral Scatter, a per-band spectral delay (see SpectralScatter.swift).
     private let spectralBlur     = SpectralBlur()
     // Temporal haze: octave-down feedback glow after the reverb (see Shimmer.swift).
@@ -427,6 +430,7 @@ final class AudioEngine {
         grit.process(left: l, right: r, count: n)
         bandEQ.process(l, count: n, channel: 0); bandEQ.process(r, count: n, channel: 1)
         postTube.process(left: l, right: r, count: n)
+        if postReverbOn { postReverb.process(left: l, right: r, count: n) }
         // Pull down narrow resonances that build up from stacked effects.
         resonanceTamer.process(left: l, right: r, count: n)
         finalSub1.process(l, count: n, channel: 0); finalSub1.process(r, count: n, channel: 1)
@@ -640,6 +644,19 @@ final class AudioEngine {
     func setBandEQ(db: [Double]) { bandEQ.setGains(db: db) }
     /// Post tube saturator (under the EQ): amount 0–1, voiced by the selected recipe.
     func setPostTube(amount: Double, recipe: SaturatorRecipe) { postTube.configure(amount: amount, recipe: recipe) }
+
+    /// Reverb character for both reverbs (see ConvolutionReverb.Style).
+    func setReverbStyle(_ name: String) {
+        reverbFilter.setStyle(name); postReverb.setStyle(name)
+    }
+    /// Post reverb (after the final Tube): amount 0–1 sets decay (0.6 → 3 s) and wet level.
+    func setPostReverb(amount a: Double) {
+        postReverbOn = a > 0.001
+        guard postReverbOn else { return }
+        let decay = 0.6 + 2.4 * a
+        if abs(decay - lastPostDecay) > 0.01 { lastPostDecay = decay; postReverb.setDecay(decay) }
+        postReverb.setMix(dry: 1, wet: Float(0.9 * a), out: Float(1 / (1 + 0.35 * a)))
+    }
 
     /// Tape wow & flutter / self-erasure: effective 0–1 (see Tape.swift).
     func setTapeWow(effective eff: Float) { tapeWow.setStrength(Double(eff)) }
