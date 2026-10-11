@@ -227,96 +227,194 @@ final class RecipeStage {
     }
 }
 
-// MARK: - Post tube saturator
+// MARK: - Post tube (compressor + saturator)
 
-// A tube compressor + saturator after the 4-band EQ (like a vintage valve
-// compressor: an opto-style compressor controls the level, then the tube
-// stage adds its harmonics), voiced by the same recipe as the Color stage (emphasis EQ, tube bias, harmonic recipe). The
-// knob sets the drive (0–18 dB × the recipe's even multiplier); the first
-// quarter of its travel also fades the stage in from fully dry, so 0 is
-// exactly bypassed and turning it up never jumps. Runs inside the same
-// fixed +7 dB drive as the Color stage so it's hit at the same level.
+// The Tube knob after the 4-band EQ: like a vintage valve compressor.
+//
+//  1. Compressor (opto-style, stereo-linked): threshold 10 dB above the
+//     music's own 3 s average (EMP often runs 20–30 dB under full scale here;
+//     push into it with Pre-Amp), ratio 2 → 4:1 with the knob, 3 ms attack,
+//     two-stage release (80 ms for short peaks, 1.5 s for sustained loudness),
+//     half the average reduction made up. Evens out peaks so the tube is hit
+//     consistently instead of transients breaking up first.
+//  2. Level reference: the signal is brought to −18 dBFS for the tube and
+//     restored after, so it acts the same at any listening level.
+//  3. Recipe emphasis EQ (pre/post), as in the Color stage.
+//  4. Drive 0 → 12 dB (× the recipe's even multiplier, clamped), applied
+//     once (not squared), so most of the knob sits in the warm zone.
+//  5. A soft, asymmetric tube curve: saturation fades in gradually (a
+//     high-order soft knee rather than tanh's sudden bend), the negative half
+//     compresses a little sooner than the positive (even harmonics), and the
+//     recipe's bias shifts the operating point. Normalized to unity
+//     small-signal gain and re-centred so silence stays silent.
+//  6. 4× oversampling around the curve (windowed-sinc, 96 taps), so its
+//     harmonics don't fold back as inharmonic fizz. Lo-Q skips it.
+//  7. A low-pass after the tube that closes as the knob rises (18 kHz →
+//     7 kHz), like valve gear rolling off its top.
+// At "off" (0) the whole stage, low-pass included, is bypassed exactly; the
+// first quarter of the knob fades the stage in from dry.
 final class PostTubeSaturator {
+    private static let os = 4, taps = 96
+    private static let fir: [Float] = {
+        // Low-pass prototype at the 4× rate: cutoff ~20 kHz, Blackman window.
+        let n = PostTubeSaturator.taps, fc = 20000.0 / (44100.0 * Double(PostTubeSaturator.os))
+        var h = [Float](repeating: 0, count: n); var sum = 0.0
+        for i in 0..<n {
+            let m = Double(i) - Double(n - 1) / 2
+            let sinc = m == 0 ? 2 * fc : sin(2 * Double.pi * fc * m) / (Double.pi * m)
+            let w = 0.42 - 0.5 * cos(2 * Double.pi * Double(i) / Double(n - 1)) + 0.08 * cos(4 * Double.pi * Double(i) / Double(n - 1))
+            h[i] = Float(sinc * w); sum += sinc * w
+        }
+        return h.map { $0 / Float(sum) }
+    }()
+
     private let stage = RecipeStage()
-    private let sat = WebAudioSaturator(voicing: .even)
-    private let drive = Float(pow(10, 7.0 / 20))
     private let lock = NSLock()
-    private var targetMix = 0.0, mix = 0.0
-    private var amount = 0.0
-    // Tube compressor (opto-style, ahead of the saturation): stereo-linked,
-    // ratio 1.3 → 3:1 with the knob, threshold −18 dBFS, 10 ms attack and a
-    // two-stage release (fast 80 ms for short peaks, slow 1.5 s for sustained
-    // loudness — glue without pumping), half the average reduction made up.
-    private var compEnv = 0.0, fastRel = 1.0, slowRel = 1.0, avgGR = 1.0
-    // Level independence: EMP often runs 20–30 dB below full scale here (the
-    // user's Post-Gain comes after), so fixed thresholds never engage. A slow
-    // (3 s) level tracker sets the compressor threshold 4 dB above the music's
-    // own average, and brings the signal to a −18 dBFS reference for the tube
-    // (undone after), so both act the same at any listening level.
-    private var longRMS = 0.01
+    private var targetMix = 0.0, mix = 0.0, amount = 0.0
+    private var driveLin = 1.0, bias = 0.3, norm = 1.0, off = 0.0
+    private var lowQ = false
+
+    // Compressor / level state
+    private var compEnv = 0.0, fastRel = 1.0, slowRel = 1.0, avgGR = 1.0, longRMS = 0.01
+    // Oversampling histories (per channel) and post low-pass
+    // Circular histories (no allocation on the audio thread): the 24 most
+    // recent input samples per channel for the polyphase interpolator, and
+    // the 96 most recent 4× samples for the decimation filter.
+    private let upBuf = UnsafeMutablePointer<Float>.allocate(capacity: 2 * 32)
+    private let dnBuf = UnsafeMutablePointer<Float>.allocate(capacity: 2 * 128)
+    private var upW = [0, 0], dnW = [0, 0]
+    private var lpA = [0.0, 0.0], lpB = [0.0, 0.0]
     private let dryL = UnsafeMutablePointer<Float>.allocate(capacity: 4096)
     private let dryR = UnsafeMutablePointer<Float>.allocate(capacity: 4096)
+    private let refBuf = UnsafeMutablePointer<Float>.allocate(capacity: 4096)
+    // The oversampling filters delay the wet path by ~24 samples; the dry
+    // path (used while the knob fades the stage in) is delayed to match, so
+    // the blend doesn't comb-filter.
+    private static let osLatency = 24
+    private let dryDelay = UnsafeMutablePointer<Float>.allocate(capacity: 2 * 32)
+    private var ddW = 0
 
-    deinit { dryL.deallocate(); dryR.deallocate() }
+    init() {
+        upBuf.initialize(repeating: 0, count: 64); dnBuf.initialize(repeating: 0, count: 256)
+        dryDelay.initialize(repeating: 0, count: 64)
+    }
+    deinit { dryL.deallocate(); dryR.deallocate(); refBuf.deallocate(); upBuf.deallocate(); dnBuf.deallocate(); dryDelay.deallocate() }
 
-    /// amount 0…1, recipe as selected in the dropdown.
-    func configure(amount: Double, recipe r: SaturatorRecipe) {
-        let a = max(0, min(1, amount))
-        let driveDb = min(24, a * 18 * r.evenMul)
-        stage.configure(r, amount: driveDb / 16)
-        sat.setDrive(driveDb: driveDb)
-        sat.setBias(r.bias)
-        lock.lock(); targetMix = min(1, a * 4); self.amount = a; lock.unlock()
+    /// The tube curve: soft high-order knee, slightly asymmetric.
+    @inline(__always) private static func curve(_ z: Double) -> Double {
+        let k = z >= 0 ? 1.0 : 0.85                       // negative half compresses a bit sooner
+        let a = abs(z) / k
+        return (z >= 0 ? 1 : -1) * k * a / pow(1 + pow(a, 2.5), 0.4)
     }
 
-    func setLowQuality(_ on: Bool) { sat.setLowQuality(on); stage.setLowQuality(on) }
+    /// amount 0…1, recipe as selected in the dropdown.
+    func configure(amount a0: Double, recipe r: SaturatorRecipe) {
+        let a = max(0, min(1, a0))
+        let mul = max(0.7, min(1.4, r.evenMul))
+        let d = pow(10, a * 12 * mul / 20)
+        let b = 0.15 + 0.5 * r.bias * a                    // recipe bias, deeper with the knob
+        let o = Self.curve(b)
+        let slope = (Self.curve(b + 1e-4) - Self.curve(b - 1e-4)) / 2e-4
+        stage.configure(r, amount: a * 0.75)
+        lock.lock()
+        targetMix = min(1, a * 4); amount = a; driveLin = d; bias = b; off = o; norm = 1 / max(slope * d, 1e-6)
+        lock.unlock()
+    }
+
+    func setLowQuality(_ on: Bool) { lock.lock(); lowQ = on; lock.unlock(); stage.setLowQuality(on) }
 
     func process(left l: UnsafeMutablePointer<Float>, right r: UnsafeMutablePointer<Float>, count n: Int) {
-        lock.lock(); let t = targetMix, amt = amount; lock.unlock()
-        if t == 0 && mix < 1e-4 { mix = 0; return }
-        var off = 0
-        while off < n {
-            let c = min(4096, n - off), a = l + off, b = r + off
-            dryL.assign(from: a, count: c); dryR.assign(from: b, count: c)
-            // Tube compressor first; threshold 4 dB above the music's own level.
-            let rmsC = 1 - exp(-1 / (3.0 * 44100.0))
-            let ratio = 1.3 + 1.7 * amt
-            let atk = 1 - exp(-1 / (0.010 * 44100.0))
-            let fR = 1 - exp(-1 / (0.080 * 44100.0)), sR = 1 - exp(-1 / (1.5 * 44100.0))
-            let avgC = 1 - exp(-1 / (3.0 * 44100.0))
+        lock.lock()
+        let t = targetMix, amt = amount, d = driveLin, b = bias, o = off, nm = norm, lq = lowQ
+        lock.unlock()
+        if t == 0 && mix < 1e-4 { mix = 0; return }       // "off": exact bypass, low-pass included
+        let sr = 44100.0
+        let rmsC = 1 - exp(-1 / (3.0 * sr))
+        let ratio = 2 + 2 * amt
+        let atk = 1 - exp(-1 / (0.003 * sr))
+        let fR = 1 - exp(-1 / (0.080 * sr)), sR = 1 - exp(-1 / (1.5 * sr)), sA = 1 - exp(-1 / (0.050 * sr))
+        let avgC = 1 - exp(-1 / (3.0 * sr))
+        let lpHz = 18000 * pow(7.0 / 18.0, amt)             // closes as the knob rises
+        let lpC = 1 - exp(-2 * Double.pi * lpHz / sr)
+        let h = Self.fir, OS = Self.os, T = Self.taps
+        var done = 0
+        while done < n {
+            let c = min(4096, n - done), a = l + done, bb = r + done
+            dryL.assign(from: a, count: c); dryR.assign(from: bb, count: c)
+            let step = (t - mix) / Double(c)
             for i in 0..<c {
-                let lvl = Double(max(abs(a[i]), abs(b[i])))
-                longRMS += rmsC * (Double(a[i] * a[i] + b[i] * b[i]) * 0.5 - longRMS)
-                let thr = max(1e-5, longRMS.squareRoot() * 1.585 * 1.414)       // avg RMS +4 dB, as a peak level
+                // 1. Compressor + level tracking (stereo-linked).
+                let x0 = Double(a[i]), x1 = Double(bb[i])
+                longRMS += rmsC * ((x0 * x0 + x1 * x1) * 0.5 - longRMS)
+                let thr = max(1e-5, longRMS.squareRoot() * 3.162 * 1.414)
+                let lvl = max(abs(x0), abs(x1))
                 compEnv += (lvl > compEnv ? atk : fR) * (lvl - compEnv)
                 let want = compEnv > thr ? pow(compEnv / thr, 1 / ratio - 1) : 1
-                // Two-stage opto release: the fast stage recovers quickly from
-                // short peaks, the slow one holds back sustained loudness.
                 fastRel = want < fastRel ? want : fastRel + fR * (want - fastRel)
-                slowRel = want < slowRel ? slowRel + atk * 0.2 * (want - slowRel) : slowRel + sR * (want - slowRel)
-                let gr = min(fastRel, slowRel)                            // the stage reducing more wins
+                slowRel = slowRel + (want < slowRel ? sA : sR) * (want - slowRel)
+                let gr = min(fastRel, slowRel)
                 avgGR += avgC * (gr - avgGR)
-                let gain = Float(gr / max(avgGR.squareRoot(), 0.5))       // makeup: half the average GR (in dB)
-                a[i] *= gain; b[i] *= gain
+                let comp = gr / max(avgGR.squareRoot(), 0.5)
+                // 2. Level reference for the tube (kept per sample to undo it exactly).
+                let ref = min(100, 0.126 / max(longRMS.squareRoot(), 1e-5))
+                refBuf[i] = Float(ref)
+                a[i] = Float(x0 * comp * ref); bb[i] = Float(x1 * comp * ref)
             }
-            // Bring the music to a −18 dBFS reference for the tube, undo after.
-            let ref = Float(0.126 / max(longRMS.squareRoot(), 1e-5))
-            let level = min(ref, 100)                                   // at most +40 dB
-            for i in 0..<c { a[i] *= drive * level; b[i] *= drive * level }
             for ch in 0..<2 {
-                let q = ch == 0 ? a : b
+                let q = ch == 0 ? a : bb
                 stage.pre(q, count: c, channel: ch)
-                sat.process(q, count: c, channel: ch)
+                let ub = upBuf + ch * 32, db = dnBuf + ch * 128
+                var uw = upW[ch], dw = dnW[ch]
+                for i in 0..<c {
+                    if lq {
+                        q[i] = Float((Self.curve(Double(q[i]) * d + b) - o) * nm)
+                        continue
+                    }
+                    // 6. 4× oversampled curve: polyphase interpolation → curve → FIR → decimate.
+                    ub[uw & 31] = q[i]
+                    var outSample: Float = 0
+                    for ph in 0..<OS {
+                        var v: Float = 0
+                        var k = ph, j = 0
+                        while k < T { v += h[k] * ub[(uw - j) & 31]; k += OS; j += 1 }
+                        v *= Float(OS)
+                        db[dw & 127] = Float((Self.curve(Double(v) * d + b) - o) * nm)
+                        if ph == OS - 1 {
+                            var acc: Float = 0
+                            for m in 0..<T { acc += h[m] * db[(dw - m) & 127] }
+                            outSample = acc
+                        }
+                        dw += 1
+                    }
+                    uw += 1
+                    q[i] = outSample
+                }
+                upW[ch] = uw; dnW[ch] = dw
                 stage.post(q, count: c, channel: ch)
+                // 7. Valve roll-off, then undo the level reference.
+                var la = lpA[ch], lb = lpB[ch]
+                for i in 0..<c {
+                    la += lpC * (Double(q[i]) - la); lb += lpC * (la - lb)
+                    q[i] = Float(lb)
+                }
+                lpA[ch] = la; lpB[ch] = lb
             }
-            let step = (t - mix) / Double(c)
+            let L = lq ? 0 : Self.osLatency
             for i in 0..<c {
                 mix += step
                 let w = Float(mix)
-                a[i] = dryL[i] + (a[i] / (drive * level) - dryL[i]) * w
-                b[i] = dryR[i] + (b[i] / (drive * level) - dryR[i]) * w
+                // Dry delayed to line up with the oversampled wet path.
+                var dl = dryL[i], dr = dryR[i]
+                if L > 0 {
+                    dryDelay[ddW & 31] = dl; dryDelay[32 + (ddW & 31)] = dr
+                    dl = dryDelay[(ddW - L) & 31]; dr = dryDelay[32 + ((ddW - L) & 31)]
+                    ddW += 1
+                }
+                let ref = refBuf[max(0, i - L)]
+                a[i] = dl + (a[i] / ref - dl) * w
+                bb[i] = dr + (bb[i] / ref - dr) * w
             }
-            off += c
+            done += c
         }
     }
 }
