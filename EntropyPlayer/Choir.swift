@@ -5,10 +5,12 @@ import Foundation
 // A crowd of virtual singers, each replaying the music with its own small
 // delay, pitch offset and vibrato, from its own place in the room.
 //
-// Each voice is a two-head pitch shifter reading a shared mono delay line:
-// the heads sweep a 40 ms window at a rate set by the voice's pitch ratio
-// and crossfade triangularly, so the voice holds a steady detune instead of
-// the back-and-forth wobble of a plain chorus.
+// Each voice is a three-head pitch shifter reading a shared mono delay line:
+// the heads sweep a window of the voice's own length (25–60 ms) a third
+// apart, sin² windows normalized by their sum, so the voice holds a steady
+// detune; each voice then passes two decorrelating allpasses with its own
+// lengths. Different window lengths and decorrelation stop the voices from
+// lining up into the same comb filters (the old metallic/phasey sound).
 //
 // Per voice, fixed for the life of the player:
 //   • stereo position (−1…1) and distance (0…1). Distance lowers the level,
@@ -27,7 +29,7 @@ import Foundation
 // compressor (2:1 above −20 dBFS, ≤ 6 dB) before joining the dry signal.
 //
 // Knobs (0…1): Voices (0–16 singers, the newest fading in continuously),
-// Detune (d up to ±35 cents), Delay (D up to 60 ms), Vibrato (up to ±40 cents).
+// Detune (d up to ±50 cents), Delay (D up to 80 ms), Vibrato (up to ±55 cents).
 // Voices 0 is exactly dry. Dry + choir are power-matched so adding singers
 // thickens without getting louder. Realtime-safe: all buffers preallocated.
 final class Choir {
@@ -52,6 +54,9 @@ final class Choir {
         // drive, normalized to unity small-signal gain; plus a DC blocker.
         var shape = 0, bias = 0.0, drive = 1.0, norm = 1.0, off = 0.0
         var hpX = 0.0, hpY = 0.0
+        var win = 0.04 * 44100.0                    // this voice's own grain window
+        var ap1 = 0, ap2 = 0                        // decorrelation allpass write indices
+        var d1 = 150, d2 = 330                      // and lengths
     }
 
     /// Bank of saturation curves (all odd-symmetric, |f| ≤ ~1); the bias
@@ -84,9 +89,11 @@ final class Choir {
     private let wetL = UnsafeMutablePointer<Double>.allocate(capacity: Choir.maxBlock)
     private let wetR = UnsafeMutablePointer<Double>.allocate(capacity: Choir.maxBlock)
     private var glueEnv = 0.0, glueGain = 1.0
+    private let apBuf = UnsafeMutablePointer<Double>.allocate(capacity: Choir.maxVoices * 1024)
 
     init() {
         line.initialize(repeating: 0, count: Self.lineSize)
+        apBuf.initialize(repeating: 0, count: Self.maxVoices * 1024)
         v.initialize(repeating: Voice(), count: Self.maxVoices)
         for i in 0..<Self.maxVoices {
             var x = Voice()
@@ -108,11 +115,13 @@ final class Choir {
             x.off = Self.curve(x.shape, x.bias)
             let slope = (Self.curve(x.shape, x.bias + 1e-4) - Self.curve(x.shape, x.bias - 1e-4)) / 2e-4
             x.norm = 1 / max(slope * x.drive, 1e-6)
+            x.win = (0.025 + 0.035 * rand()) * 44100
+            x.d1 = 120 + Int(rand() * 200); x.d2 = 260 + Int(rand() * 230)
             v[i] = x
         }
     }
 
-    deinit { line.deallocate(); v.deallocate(); wetL.deallocate(); wetR.deallocate() }
+    deinit { line.deallocate(); v.deallocate(); wetL.deallocate(); wetR.deallocate(); apBuf.deallocate() }
 
     private func rand() -> Double {
         rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17
@@ -159,10 +168,10 @@ final class Choir {
 
         let count16 = voicesK * Double(maxActive)                 // fractional singer count
         let active = min(maxActive, Int(count16.rounded(.up)))
-        let dCents = 35 * detuneK, dMs = 60 * delayK, vibCents = 40 * vibK
+        let dCents = 50 * detuneK, dMs = 80 * delayK, vibCents = 55 * vibK
         let cpr = log(2.0) / 1200                                 // cents → ratio − 1 (small-angle)
         // Power-match dry vs. choir.
-        let wet = min(1, count16) * 0.95
+        let wet = min(1, count16) * 2.0          // at full Voices the choir sits ~6 dB above the dry
         let dryG = 1 / (1 + wet * wet).squareRoot(), wetG = wet * dryG / max(1, count16).squareRoot()
             / (0.4 * 0.5 * 2 / 3).squareRoot()   // distance loss E[(1+1.5d)^-2] = 0.4, equal-power pan ½, triangular head crossfade ⅔
         let distLP = { (d: Double) in 1 - exp(-2 * Double.pi * (12000 - 9000 * d) / sr) }
@@ -199,6 +208,7 @@ final class Choir {
             let level = min(1, max(0, count16 - Double(k))) / (1 + 1.5 * x.dist) * wetG
             let gl = x.gl * level, gr = x.gr * level
             var phase = x.phase, vph = x.vibPhase, lp = x.lp, base = x.delay
+            let vw = x.win
             var wp = w
             for i in 0..<count {
                 // Mono input into the line (once, on the first voice).
@@ -209,22 +219,35 @@ final class Choir {
                 let t = vph * 2 - 1                                // −1…1
                 let sine = 4 * t * (1 - abs(t))                    // ≈ sin(π·t) shape
                 let cents = det + vibCents * sine
-                phase += -(cents * cpr) / W                        // ratio > 1 → read head catches up
+                phase += -(cents * cpr) / vw                       // ratio > 1 → read head catches up
                 phase -= phase.rounded(.down)
                 vph += vInc; if vph >= 1 { vph -= 1 }
                 base += dStep
-                let p2 = phase + 0.5 - (phase + 0.5 >= 1 ? 1 : 0)
-                let g1 = 1 - abs(2 * phase - 1)
-                func tap(_ d: Double) -> Double {
+                // Three heads a third apart, sin² windows normalized by their sum.
+                var y = 0.0, ws = 0.0
+                for h in 0..<3 { var ph = phase + Double(h) / 3; if ph >= 1 { ph -= 1 }; let sw = sin(Double.pi * ph); let w2 = sw * sw
+                    y += tapF(base + ph * vw) * w2; ws += w2 }
+                y /= max(ws, 0.3)
+                func tapF(_ d: Double) -> Double {
                     let pos = Double(wp) - d
                     let fl = pos.rounded(.down), fr = pos - fl
                     let i0 = Int(fl) & mask, i1 = (i0 + 1) & mask
                     return Double(line[i0]) + Double(line[i1] - line[i0]) * fr
                 }
-                let y = tap(base + phase * W) * g1 + tap(base + p2 * W) * (1 - g1)
                 lp += lpc * (y - lp)
                 // This voice's own saturator (unity small-signal gain), DC-blocked.
-                let sat = (Self.curve(shp, lp * drv + bias) - off) * nrm
+                // Two decorrelating allpasses (voice-specific lengths).
+                var dv = lp
+                for (aIdx, len) in [(0, x.d1), (1, x.d2)] {
+                    let base0 = k * 1024 + aIdx * 512
+                    let wi = aIdx == 0 ? x.ap1 : x.ap2
+                    let dl = apBuf[base0 + ((wi - len) & 511)]
+                    let ww = dv + 0.5 * dl
+                    apBuf[base0 + (wi & 511)] = ww
+                    dv = dl - 0.5 * ww
+                    if aIdx == 0 { x.ap1 = (wi + 1) & 511 } else { x.ap2 = (wi + 1) & 511 }
+                }
+                let sat = (Self.curve(shp, dv * drv + bias) - off) * nrm
                 hy = hpC * (hy + sat - hx); hx = sat
                 wetL[i] += hy * gl
                 wetR[i] += hy * gr
@@ -245,8 +268,9 @@ final class Choir {
                 glueEnv += (a > glueEnv ? gA : gR) * (a - glueEnv)
                 let want = glueEnv > thr ? max(0.5, (thr * (glueEnv / thr).squareRoot()) / glueEnv) : 1
                 glueGain += (want < glueGain ? gA : gR) * (want - glueGain)
-                left[i] = Float(Double(left[i]) * dryG + wetL[i] * glueGain)
-                if let r = right { r[i] = Float(Double(r[i]) * dryG + wetR[i] * glueGain) }
+                // ×2.1 makes up what the glue, saturators and decorrelation take off.
+                left[i] = Float(Double(left[i]) * dryG + wetL[i] * glueGain * 2.1)
+                if let r = right { r[i] = Float(Double(r[i]) * dryG + wetR[i] * glueGain * 2.1) }
             }
         }
         if active == 0 {

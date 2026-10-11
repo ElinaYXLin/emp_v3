@@ -103,13 +103,13 @@ extension AppState {
                       ? String(format: "%.1f voices, fixed random pan & distance (up to 15 ms later, darker)", cVoices * 16)
                       : "off"),
                 .init(label: "Detune",   value: cVoices > 0.001 && cDetune > 0.001
-                      ? String(format: "±%.0f ct around each voice's tendency (±%.0f ct), new target every 10 s", 35 * cDetune, 17.5 * cDetune)
+                      ? String(format: "±%.0f ct around each voice's tendency (±%.0f ct), new target every 10 s", 50 * cDetune, 25 * cDetune)
                       : "none"),
                 .init(label: "Delay",    value: cVoices > 0.001 && cDelay > 0.001
-                      ? String(format: "0–%.0f ms, wandering the same way", 60 * cDelay)
+                      ? String(format: "0–%.0f ms, wandering the same way", 80 * cDelay)
                       : "none"),
                 .init(label: "Vibrato",  value: cVoices > 0.001 && cVib > 0.001
-                      ? String(format: "±%.0f ct, 3–20 Hz per voice", 40 * cVib)
+                      ? String(format: "±%.0f ct, 3–20 Hz per voice", 55 * cVib)
                       : "none"),
             ]),
             .init(title: "SPECTRAL HAZE", rows: [

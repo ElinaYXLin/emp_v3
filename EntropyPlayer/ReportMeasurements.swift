@@ -125,7 +125,8 @@ enum ReportMeasurer {
         let n = input.count
         let gd = GroupDelay(); gd.setScale(s.gdScale); gd.flushParameters()
         let bl = SpectralBlur(); bl.setStrength(s.blur)
-        let mb = MelodyBlur(); mb.set(smear: s.blurSmear, wash: s.blurWash, soften: min(1, s.blurSwell * 1.2), distance: 0, swell: s.blurSwell, diffuse: s.blurDiffuse)
+        let mb = MelodyBlur(); mb.set(smear: 0, wash: s.blurWash, soften: 0, distance: 0, swell: 0, diffuse: s.blurDiffuse)
+        let smr = SmearBlur(); smr.setStrength(s.blurSmear); let swl = SwellBlur(); swl.setStrength(s.blurSwell)
         let smk = SmokeBlur(); smk.setStrength(s.blurSmoke); let uw = UnderwaterBlur(); uw.setStrength(s.blurUnderwater)
         let gr = GrainEcho(); gr.setStrength(s.grain)
         let ch = Choir(); ch.setVoices(s.choirVoices); ch.setDetune(s.choirDetune)
@@ -142,6 +143,8 @@ enum ReportMeasurer {
                     let c = min(470, n - i), a = lb.baseAddress! + i, b = rb.baseAddress! + i
                     ch.process(left: a, right: b, count: c)
                     mb.process(left: a, right: b, count: c)
+                    smr.process(left: a, right: b, count: c)
+                    swl.process(left: a, right: b, count: c)
                     smk.process(left: a, right: b, count: c)
                     uw.process(left: a, right: b, count: c)
                     gd.process(left: a, right: b, count: c)

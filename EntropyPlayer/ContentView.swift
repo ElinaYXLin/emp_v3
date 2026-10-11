@@ -615,11 +615,11 @@ struct ContentView: View {
                     knobRow(key: "voices", label: "Voices",  sub: "Singers",
                             display: { "\(Int(($0 / 100 * 16).rounded()))" })
                     knobRow(key: "detune", label: "Detune",  sub: "± cents",
-                            display: { "\(Int(($0 / 100 * 35).rounded())) ct" })
+                            display: { "\(Int(($0 / 100 * 50).rounded())) ct" })
                     knobRow(key: "cdelay", label: "Delay",   sub: "Spread",
-                            display: { "\(Int(($0 / 100 * 60).rounded())) ms" })
+                            display: { "\(Int(($0 / 100 * 80).rounded())) ms" })
                     knobRow(key: "cvib",   label: "Vibrato", sub: "3–20 Hz",
-                            display: { "\(Int(($0 / 100 * 40).rounded())) ct" })
+                            display: { "\(Int(($0 / 100 * 55).rounded())) ct" })
                 }
                 knobGroup("Tape") {
                     knobRow(key: "hyst", label: "Hysteresis", sub: "Tape memory",

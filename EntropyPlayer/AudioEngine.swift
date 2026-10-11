@@ -79,6 +79,8 @@ final class AudioEngine {
     private let grit             = Grit()
     private let melodyBlur       = MelodyBlur()
     private let smokeBlur        = SmokeBlur()
+    private let smearBlur        = SmearBlur()
+    private let swellBlur        = SwellBlur()
     private let underwaterBlur   = UnderwaterBlur()
     private let bandEQ           = FourBandEQ()
     private let postTube         = PostTubeSaturator()
@@ -371,6 +373,8 @@ final class AudioEngine {
         choir.process(left: l, right: r, count: n)
         // Blur section first (smear, wash, soften, distance), before the Effects page.
         melodyBlur.process(left: l, right: r, count: n)
+        smearBlur.process(left: l, right: r, count: n)
+        swellBlur.process(left: l, right: r, count: n)
         smokeBlur.process(left: l, right: r, count: n)
         underwaterBlur.process(left: l, right: r, count: n)
 
@@ -620,8 +624,9 @@ final class AudioEngine {
     /// Blur section: effective 0–1 each.
     /// Blur section: Smear, Wash, Swell (also softens attacks), Diffuse, Smoke, Underwater (effective 0–1 each).
     func setMelodyBlur(smear: Float, wash: Float, swell: Float, diffuse: Float, smoke: Float, underwater: Float) {
-        melodyBlur.set(smear: Double(smear), wash: Double(wash), soften: Double(min(1, swell * 1.2)), distance: 0,
-                       swell: Double(swell), diffuse: Double(diffuse))
+        melodyBlur.set(smear: 0, wash: Double(wash), soften: 0, distance: 0, swell: 0, diffuse: Double(diffuse))
+        smearBlur.setStrength(Double(smear))
+        swellBlur.setStrength(Double(swell))
         smokeBlur.setStrength(Double(smoke))
         underwaterBlur.setStrength(Double(underwater))
     }
