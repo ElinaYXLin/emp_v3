@@ -55,6 +55,8 @@ final class Choir {
         var shape = 0, bias = 0.0, drive = 1.0, norm = 1.0, off = 0.0
         var hpX = 0.0, hpY = 0.0
         var win = 0.04 * 44100.0                    // this voice's own grain window
+        var winPh = 0.0, winRate = 0.1              // slow drift of the window (head spacing)
+        var lastWin = -1.0
         var ap1 = 0, ap2 = 0                        // decorrelation allpass write indices
         var d1 = 150, d2 = 330                      // and lengths
     }
@@ -116,6 +118,7 @@ final class Choir {
             let slope = (Self.curve(x.shape, x.bias + 1e-4) - Self.curve(x.shape, x.bias - 1e-4)) / 2e-4
             x.norm = 1 / max(slope * x.drive, 1e-6)
             x.win = (0.025 + 0.035 * rand()) * 44100
+            x.winPh = rand(); x.winRate = 0.06 + 0.08 * rand()
             x.d1 = 120 + Int(rand() * 200); x.d2 = 260 + Int(rand() * 230)
             v[i] = x
         }
@@ -168,10 +171,18 @@ final class Choir {
 
         let count16 = voicesK * Double(maxActive)                 // fractional singer count
         let active = min(maxActive, Int(count16.rounded(.up)))
-        let dCents = 50 * detuneK, dMs = 80 * delayK, vibCents = 55 * vibK
+        // Floors: a singer with (almost) no detune or vibrato is a static
+        // delayed copy, and static copies summed with the dry signal are
+        // comb filters — fixed resonances (the ~400 Hz hum). A few cents of
+        // detune and a little vibrato keep every comb sweeping, so it
+        // averages out into gentle chorus instead of ringing.
+        let dCents = 50 * detuneK, dMs = 80 * delayK, vibCents = max(4, 55 * vibK)
+        let minDet = 6.0
         let cpr = log(2.0) / 1200                                 // cents → ratio − 1 (small-angle)
         // Power-match dry vs. choir.
-        let wet = min(1, count16) * 2.0          // at full Voices the choir sits ~6 dB above the dry
+        // Choir level grows over the first 3 singers (it used to jump to
+        // +6 dB over the dry as soon as one singer was in).
+        let wet = min(1, count16 / 3) * 2.0      // at full Voices the choir sits ~6 dB above the dry
         let dryG = 1 / (1 + wet * wet).squareRoot(), wetG = wet * dryG / max(1, count16).squareRoot()
             / (0.4 * 0.5 * 2 / 3).squareRoot()   // distance loss E[(1+1.5d)^-2] = 0.4, equal-power pan ½, triangular head crossfade ⅔
         let distLP = { (d: Double) in 1 - exp(-2 * Double.pi * (12000 - 9000 * d) / sr) }
@@ -196,7 +207,8 @@ final class Choir {
             let shp = x.shape, bias = x.bias, drv = x.drive, nrm = x.norm, off = x.off
             var hx = x.hpX, hy = x.hpY
             let s = x.segPos / seg, e = 0.5 - 0.5 * cos(.pi * s)   // cosine glide over the segment
-            let det = (x.tendDet + x.detFrom + (x.detTo - x.detFrom) * e) * dCents
+            let rawDet = (x.tendDet + x.detFrom + (x.detTo - x.detFrom) * e) * dCents
+            let det = (x.tendDet >= 0 ? 1.0 : -1.0) * max(minDet * (0.7 + 0.6 * x.dist), abs(rawDet))
             let delMs = max(0, (0.5 + 0.5 * (x.tendDel + x.delFrom + (x.delTo - x.delFrom) * e))) * dMs
                 + 15 * x.dist + 1
             let target = delMs * 0.001 * sr
@@ -208,7 +220,14 @@ final class Choir {
             let level = min(1, max(0, count16 - Double(k))) / (1 + 1.5 * x.dist) * wetG
             let gl = x.gl * level, gr = x.gr * level
             var phase = x.phase, vph = x.vibPhase, lp = x.lp, base = x.delay
-            let vw = x.win
+            // The heads sit a fixed fraction of the window apart, so a fixed
+            // window is a fixed internal comb whatever the detune. Drift the
+            // window ±12 % at 0.06–0.14 Hz (≈ ±3 cents of pitch wobble) so
+            // those teeth keep moving and never settle into a resonance.
+            x.winPh += Double(count) * x.winRate / sr; x.winPh -= x.winPh.rounded(.down)
+            let vwTarget = x.win * (1 + 0.12 * sin(2 * Double.pi * x.winPh))
+            var vw = x.lastWin > 0 ? x.lastWin : vwTarget
+            let vwStep = (vwTarget - vw) / Double(count)
             var wp = w
             for i in 0..<count {
                 // Mono input into the line (once, on the first voice).
@@ -222,7 +241,7 @@ final class Choir {
                 phase += -(cents * cpr) / vw                       // ratio > 1 → read head catches up
                 phase -= phase.rounded(.down)
                 vph += vInc; if vph >= 1 { vph -= 1 }
-                base += dStep
+                base += dStep; vw += vwStep
                 // Three heads a third apart, sin² windows normalized by their sum.
                 var y = 0.0, ws = 0.0
                 for h in 0..<3 { var ph = phase + Double(h) / 3; if ph >= 1 { ph -= 1 }; let sw = sin(Double.pi * ph); let w2 = sw * sw
@@ -253,7 +272,7 @@ final class Choir {
                 wetR[i] += hy * gr
                 wp = (wp + 1) & mask
             }
-            x.phase = phase; x.vibPhase = vph; x.lp = lp; x.delay = base
+            x.phase = phase; x.vibPhase = vph; x.lp = lp; x.delay = base; x.lastWin = vw
             x.hpX = hx; x.hpY = hy
             v[k] = x
         }

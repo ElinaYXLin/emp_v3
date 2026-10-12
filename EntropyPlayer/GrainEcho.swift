@@ -2,7 +2,7 @@ import Foundation
 
 // Grain Echo: granular "memory" haze. Short overlapping grains are replayed
 // from the last `memory` milliseconds of audio — each starting at a random
-// point in that window, detuned (±4 → ±35 cents with strength), Hann-windowed and
+// point in that window, detuned (±8 → ±35 cents with strength), Hann-windowed and
 // panned somewhere across the stereo field — and mixed quietly under the dry
 // signal. It sounds like the music echoing back from a memory.
 //
@@ -19,7 +19,7 @@ final class GrainEcho {
     private static let maxMemorySec = 0.200
     private static let maxMixDb = 0.0
     private static let fullScaleGain = 1.388   // measured: puts full strength at maxMixDb
-    private static let minDetuneCents = 4.0
+    private static let minDetuneCents = 8.0
     private static let maxDetuneCents = 35.0
     private static let overlap = 4.0
     private static let bufSize = 1 << 14            // ~370 ms
@@ -89,7 +89,10 @@ final class GrainEcho {
         // comb-filter against the dry signal into a whistling, feedback-like
         // resonance (worst at low strengths, where the memory window is short).
         let minBack = grainLen * max(0, rate - 1) + max(8, 0.025 * Self.sampleRate)
-        let back = minBack + random() * max(1, memory - minBack)
+        // Spread the start over at least 35 ms: at low strengths the memory
+        // window is shorter than minBack, and every grain started exactly
+        // 25 ms back — one fixed 25 ms comb (a static resonance ladder).
+        let back = minBack + random() * max(0.035 * Self.sampleRate, memory - minBack)
         let pan = random() * 2 - 1                         // −1…1
         let angle = (pan + 1) * Double.pi / 4              // equal-power
         voices[v] = Voice(active: true,

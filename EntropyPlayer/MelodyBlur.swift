@@ -342,7 +342,11 @@ final class MelodyBlur {
                     // Frequency-locked to the nearest cloud peak (so one note's
                     // bins share a pitch and can't beat), phase free (so it
                     // stays a soft cloud, not a resonator).
-                    var wp = WP[k] + expect * FS[peakW[k]] + 0.15 * gauss()
+                    // Random walk 1.0 rad/frame (was 0.15): at 0.15 each basin
+                    // summed coherently into a ~0.6 Hz-wide pure tone at its
+                    // peak — a bank of resonators (+6–8 dB peaks on pink noise
+                    // at macro 100). 1.0 widens each line to a soft ~25 Hz band.
+                    var wp = WP[k] + expect * FS[peakW[k]] + 1.0 * gauss()
                     wp -= 2 * Float.pi * (wp / (2 * Float.pi)).rounded()
                     WP[k] = wp
                 }
