@@ -22,7 +22,7 @@ final class OfflineChain {
     static let sampleRate = 44100.0
     /// Fixed latency of the chain: group delay (512 + 64), spectral blur
     /// (2048), tape sag (88), wow & flutter centre delay (88).
-    static let latency = 512 + 64 + 2048 + 88 + TapeWowFlutter.latency + MelodyBlur.latency + 2 * 2048 + LookaheadLimiter.latency + ResonanceTamer.latency
+    static let latency = 512 + 64 + 2048 + 88 + TapeWowFlutter.latency + MelodyBlur.latency + 3 * 2048 + LookaheadLimiter.latency + ResonanceTamer.latency
 
     private let s: ChainSettings
     private let gd = GroupDelay(), bl = SpectralBlur(), gr = GrainEcho(), ch = Choir()
@@ -33,13 +33,13 @@ final class OfflineChain {
     private let wf = TapeWowFlutter(), er = TapeSelfErasure()
     private let fs1 = SubsonicFilter(), fs2 = SubsonicFilter()
     private let gl = GlowGlue(), gt = Grit(), mb = MelodyBlur(), smr = SmearBlur(), swl = SwellBlur(), smk = SmokeBlur(), uw = UnderwaterBlur()
-    private let dp = Depth(), beq = FourBandEQ(), pt = PostTubeSaturator(), rt = ResonanceTamer(), prv = ConvolutionReverb()
+    private let dp = Depth(), beq = FourBandEQ(), pt = PostTubeSaturator(), rt = ResonanceTamer(), sb = StereoBalancer(), mk = MurkFilter(), prv = ConvolutionReverb()
     private let dyn = WebAudioCompressor(), ceiling = LookaheadLimiter()
     private let inGain: Float, fixedDrive: Float, postGain: Float
 
     init(_ s: ChainSettings) {
         self.s = s
-        gd.setScale(s.gdScale); gd.setRandomness(s.gdRandom); gd.flushParameters()
+        gd.setScale(s.gdScale); gd.setRandomness(AudioEngine.groupDelayRandomness); gd.flushParameters()
         bl.setStrength(s.blur); gr.setStrength(s.grain)
         ch.setVoices(s.choirVoices); ch.setDetune(s.choirDetune); ch.setDelay(s.choirDelay); ch.setVibrato(s.choirVibrato)
         rv.setStyle(s.reverbStyle); rv.setDecay(s.reverbDecaySec); rv.setAmount(pow(s.reverbDecaySec / 60, 1 / 1.5)); sh.setStrength(s.shimmer)
@@ -48,7 +48,7 @@ final class OfflineChain {
         ev.setDrive(driveDb: min(24, s.evenDb * s.recipe.evenMul)); ev.setBias(s.recipe.bias); ev.setWobble(s.wobble)
         od.setDrive(driveDb: min(24, s.oddDb * s.recipe.oddMul))
         th.setStrength(s.hysteresis); sg.setStrength(s.sag); ro.setSlope(dbPerOctave: s.rolloff)
-        mb.set(smear: 0, wash: s.blurWash, soften: 0, distance: 0, swell: 0, diffuse: s.blurDiffuse); smr.setStrength(s.blurSmear); swl.setStrength(s.blurSwell); smk.setStrength(s.blurSmoke); uw.setStrength(s.blurUnderwater); gt.set(bits: s.gritBits, softClip: s.gritClip, noise: s.gritNoise, corpus: s.gritCorpus, rattle: s.gritRattle); dp.setAmount(s.depth); if s.postReverb > 0.001 { prv.setStyle(s.reverbStyle); prv.setDecay(0.6 + 2.4 * s.postReverb); prv.setMix(dry: 1, wet: Float(0.9 * s.postReverb), out: Float(1 / (1 + 0.35 * s.postReverb))) }; gl.setAmount(max(s.shimmer, s.depth)); beq.setGains(db: s.bandEQ); pt.configure(amount: s.postTube, recipe: s.recipe)
+        mk.setStrength(s.murk); mb.set(smear: 0, wash: s.blurWash, soften: 0, distance: 0, swell: 0, diffuse: s.blurDiffuse); smr.setStrength(s.blurSmear); swl.setStrength(s.blurSwell); smk.setStrength(s.blurSmoke); uw.setStrength(s.blurUnderwater); gt.set(bits: s.gritBits, softClip: s.gritClip, noise: s.gritNoise, corpus: s.gritCorpus, rattle: s.gritRattle); dp.setAmount(s.depth); if s.postReverb > 0.001 { prv.setStyle(s.reverbStyle); prv.setDecay(0.6 + 2.4 * s.postReverb); prv.setMix(dry: 1, wet: Float(0.9 * s.postReverb), out: Float(1 / (1 + 0.35 * s.postReverb))) }; gl.setAmount(max(s.shimmer, s.depth)); beq.setGains(db: s.bandEQ); pt.configure(amount: s.postTube, recipe: s.recipe)
         wf.setStrength(s.wow); er.setStrength(s.erase)
         ta.setFuzz(s.fuzz); ta.setBloom(s.bloom); ta.setFur(s.fur)
         dyn.setSampleRate(Self.sampleRate)
@@ -86,6 +86,7 @@ final class OfflineChain {
             sh.process(left: a, right: b, count: n)
             dp.process(left: a, right: b, count: n)
             gl.process(left: a, right: b, count: n)
+            mk.process(left: a, right: b, count: n)
             eq.process(a, count: n, channel: 0); eq.process(b, count: n, channel: 1)
             for i in 0..<n { a[i] *= fixedDrive; b[i] *= fixedDrive }
             for ch in 0..<2 {
@@ -110,12 +111,13 @@ final class OfflineChain {
             beq.process(a, count: n, channel: 0); beq.process(b, count: n, channel: 1)
             pt.process(left: a, right: b, count: n)
             if s.postReverb > 0.001 { prv.process(left: a, right: b, count: n) }
-            rt.process(left: a, right: b, count: n)
+            sb.process(left: a, right: b, count: n)
             fs1.process(a, count: n, channel: 0); fs1.process(b, count: n, channel: 1)
             fs2.process(a, count: n, channel: 0); fs2.process(b, count: n, channel: 1)
             dyn.process(left: a, right: b, count: n)
             for i in 0..<n { a[i] *= postGain; b[i] *= postGain }
             ceiling.process(left: a, right: b, count: n)
+            rt.process(left: a, right: b, count: n)
             done += n
         }
     }
@@ -233,7 +235,7 @@ extension AppState {
         cs.rolloff = eff("rolloff") * 6
         cs.compressor = dynamicsMode == .compressor
         cs.gdScale = eff("gd") * 20
-        cs.gdRandom = eff("gdrand") * 0.5
+        cs.murk = eff("murk")
         cs.blur = eff("blur"); cs.grain = eff("grain")
         cs.choirVoices = eff("voices"); cs.choirDetune = eff("detune")
         cs.choirDelay = eff("cdelay"); cs.choirVibrato = eff("cvib")

@@ -248,3 +248,111 @@ final class SwellBlur {
         }
     }
 }
+
+// Murk — the bass buries the mids, using the ear's own upward masking.
+// Three parts, all scaled by strength and all level-independent (ratios):
+//  1. Bass-triggered mid duck: the bass's share of the frame's energy
+//     (fast attack, ~200 ms release) pulls a broad 300 Hz–3 kHz band down,
+//     up to −21 dB, so every kick / bass note sinks the mids beneath it.
+//  2. Spectral masking: each bass bin (≤ 260 Hz) casts an upward masking
+//     curve (slope 24 → 12 dB/oct, offset 14 → 6 dB as strength rises);
+//     mid/high bins that fall under it are attenuated Wiener-style, so quiet
+//     detail the bass would "nearly" hide is hidden.
+//  3. Low-mid bloom: up to +6 dB around 150–400 Hz, backed off when that
+//     band is already heavy (slow, ~400 ms) — woolly, behind-a-wall warmth.
+//  Plus a high darkening (−4 dB/oct above 2 kHz at full) and a haze fog:
+//     removed mid detail returns smeared in pitch and time.
+// Gains glided per bin; the fog adds drifting phases. Exact pass-through at 0.
+final class MurkFilter: BlurSTFT {
+    private let G = [BlurSTFT.buf(1024, 1), BlurSTFT.buf(1024, 1)], p = BlurSTFT.buf(1024)
+    // Haze: a slow, pitch-smeared magnitude fog with drifting phases, per channel.
+    private let fog = [BlurSTFT.buf(1024), BlurSTFT.buf(1024)], fogPh = [BlurSTFT.buf(1024), BlurSTFT.buf(1024)], mag = BlurSTFT.buf(1024)
+    private let weightDark = BlurSTFT.buf(1024)
+    // Loudness hold: smoothed in/out loudness (≈ K-weighted: bins below
+    // ~100 Hz ignored, 2–8 kHz counted extra) and the makeup gain.
+    private var inLoud: [Float] = [1e-12, 1e-12], outLoud: [Float] = [1e-12, 1e-12], makeup: [Float] = [1, 1]
+    private let weightK = BlurSTFT.buf(1024)
+    private var bassEnv: [Float] = [0, 0], bloomEnv: [Float] = [0, 0], bloomLong: [Float] = [1e-9, 1e-9]
+    private static let srcBins = 12                                   // ≤ ~260 Hz
+    private let weightDuck = BlurSTFT.buf(1024), weightBloom = BlurSTFT.buf(1024)
+    override init() {
+        super.init()
+        for k in 1..<Self.bins {
+            let hz = Float(k) * 44100 / Float(Self.n)
+            // Duck: flat 300 Hz–3 kHz, half-octave tapers.
+            let lo = log2f(hz / 300), hi = log2f(3000 / hz)
+            weightDuck[k] = max(0, min(1, min(lo, hi) / 0.5 + 1))
+            // Bloom: bell on ~250 Hz, ±1.3 octaves.
+            weightBloom[k] = max(0, 1 - abs(log2f(hz / 250)) / 1.3)
+            // Darkening: 0 below 2 kHz, rising one unit per octave above.
+            weightDark[k] = max(0, log2f(hz / 2000))
+            weightK[k] = hz < 100 ? 0 : (hz > 2000 ? 1.6 : 1)
+        }
+    }
+    override func idle(_ ch: Int) { for k in 0..<Self.bins { G[ch][k] = 1 }; makeup[ch] = 1 }
+    override func spectrum(_ ch: Int) {
+        let B = Self.bins, s = strength, g = G[ch]
+        var total: Float = 1e-20, bass: Float = 0, bloomBand: Float = 0, kIn: Float = 1e-20
+        for k in 1..<B {
+            let e = re[k] * re[k] + im[k] * im[k]; p[k] = e; total += e
+            if k <= 7 { bass += e }
+            if weightBloom[k] > 0.5 { bloomBand += e }
+            kIn += e * weightK[k]
+        }
+        // 1. Duck amount from the bass share.
+        let share = bass / total
+        bassEnv[ch] += (share > bassEnv[ch] ? coef(0.015) : coef(0.2)) * (share - bassEnv[ch])
+        let duckDb = -18 * s * min(1, bassEnv[ch] * 1.6) - 3 * s
+        // 4. Bloom, backed off when the band is already heavy vs its average.
+        let bs = bloomBand / total
+        bloomEnv[ch] += coef(0.4) * (bs - bloomEnv[ch]); bloomLong[ch] += coef(4) * (bs - bloomLong[ch])
+        let heavy = max(0, min(1, bloomEnv[ch] / max(bloomLong[ch], 1e-9) - 1))
+        let bloomDb = 6 * s * (1 - 0.6 * heavy)
+        // 2. Masking curve from the bass bins.
+        let slope = 24 - 16 * s, offsetDb = 14 - 14 * s
+        let gUp = coef(0.12), gDown = coef(0.02)
+        for k in 1..<B {
+            var t: Float = 0
+            if k > Self.srcBins {
+                for j in 1...Self.srcBins where p[j] > 0 {
+                    let db = slope * log2f(Float(k) / Float(j)) + offsetDb
+                    t = max(t, p[j] * powf(10, -db / 10))
+                }
+            }
+            var gain = t > 0 ? (p[k] / (p[k] + s * 10 * t)).squareRoot() : 1
+            gain *= powf(10, (duckDb * weightDuck[k] + bloomDb * weightBloom[k] - 4 * s * weightDark[k]) / 20)
+            g[k] += (gain < g[k] ? gDown : gUp) * (gain - g[k])
+            re[k] *= g[k]; im[k] *= g[k]
+            mag[k] = (re[k] * re[k] + im[k] * im[k]).squareRoot()
+        }
+        // Haze: what the masking/duck removed from the mids comes back as a
+        // soft fog — magnitudes smeared ±2 bins and over time (60 ms in,
+        // 0.6 s out), resynthesized with slowly drifting phases — so the
+        // detail isn't just quieter, it's blurred into a cloud under the bass.
+        let F = fog[ch], PH = fogPh[ch], fIn = coef(0.06), fOut = coef(0.6)
+        let fogMix = 0.9 * s
+        for k in 3..<(B - 3) where weightDuck[k] > 0 || weightDark[k] > 0 {
+            let sm = (mag[k - 2] + 2 * mag[k - 1] + 3 * mag[k] + 2 * mag[k + 1] + mag[k + 2]) / 9
+            F[k] += (sm > F[k] ? fIn : fOut) * (sm - F[k])
+            PH[k] += Float.pi / 2 * Float(k) + 0.5 * gauss()
+            PH[k] -= 2 * Float.pi * (PH[k] / (2 * Float.pi)).rounded()
+            let w = fogMix * max(weightDuck[k], min(1, weightDark[k])) * (1 - g[k])
+            re[k] = re[k] * (1 - 0.5 * w) + w * F[k] * cosf(PH[k])
+            im[k] = im[k] * (1 - 0.5 * w) + w * F[k] * sinf(PH[k])
+        }
+        // Loudness hold: the duck, masking and darkening take energy out in
+        // bursts (every kick), which made LUFS bob. Compare smoothed
+        // K-weighted loudness out vs in (~80 ms) and make the difference up
+        // broadband (±10 dB, glided), so the *balance* still sinks the mids
+        // under the bass but the overall loudness stays put.
+        var kOut: Float = 1e-20
+        for k in 1..<B { kOut += (re[k] * re[k] + im[k] * im[k]) * weightK[k] }
+        let lc = coef(0.08)
+        inLoud[ch] += lc * (kIn - inLoud[ch]); outLoud[ch] += lc * (kOut - outLoud[ch])
+        let want = min(3.16, max(0.316, (inLoud[ch] / max(outLoud[ch], 1e-20)).squareRoot()))
+        let target = 1 + (want - 1) * min(1, s * 4)          // fully on by 25 %
+        makeup[ch] += coef(0.03) * (target - makeup[ch])
+        let mg = makeup[ch]
+        for k in 1..<B { re[k] *= mg; im[k] *= mg }
+    }
+}

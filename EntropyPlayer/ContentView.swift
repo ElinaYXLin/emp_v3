@@ -504,8 +504,8 @@ struct ContentView: View {
                     knobGroup("Spectral Haze") {
                         knobRow(key: "gd",     label: "Grp Delay", sub: "Periods",
                                 display: { String(format: "%.1fx", $0/100*20) })
-                        knobRow(key: "gdrand", label: "GD Random", sub: "Drift",
-                                display: { String(format: "±%.0f%%", $0/100*50) })
+                        knobRow(key: "murk",   label: "Murk", sub: "Bass masking",
+                                display: { "\(Int($0))%" })
                         knobRow(key: "blur",   label: "Scatter", sub: "Spectral echo",
                                 display: { "\(Int($0))%" })
                     }
@@ -711,7 +711,7 @@ struct ContentView: View {
     static func symbol(for key: String) -> String {
         [
             "eq": "speaker.wave.2", "sat": "flame", "oddsat": "bolt", "rolloff": "arrow.down.right",
-            "gd": "hourglass", "gdrand": "shuffle", "blur": "sparkles.rectangle.stack",
+            "gd": "hourglass", "gdrand": "shuffle", "murk": "drop.fill", "blur": "sparkles.rectangle.stack",
             "reverb": "building.columns", "shimmer": "sparkles", "depth": "arrow.down.to.line", "grain": "circle.dotted",
             "voices": "person.3", "detune": "tuningfork", "cdelay": "clock.arrow.circlepath", "cvib": "waveform.path",
             "hyst": "arrow.triangle.2.circlepath", "sag": "tortoise", "wow": "hurricane", "erase": "eraser",

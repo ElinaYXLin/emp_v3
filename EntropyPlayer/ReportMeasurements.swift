@@ -22,7 +22,7 @@ struct ChainSettings {
     var fileTrimDb = 0.0        // fixed local-file trim (export only)
     var preampDb = 0.0
     var postGainDb = 0.0        // export only
-    var gdRandom = 0.0          // export only
+    var murk = 0.0
     var lowQuality = false      // offline chain (benchmarks); export uses high
     var eqDb = 0.0
     var evenDb = 0.0, oddDb = 0.0

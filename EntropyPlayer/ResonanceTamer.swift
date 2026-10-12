@@ -3,15 +3,17 @@ import Accelerate
 
 // Resonance tamer: catches narrow resonances that build up when several
 // effects stack colour in the same place (e.g. ~400–500 Hz) and gently pulls
-// them down — a "soothing" dynamic EQ.
+// them down — a "soothing" dynamic EQ. Runs last, after the output limiter.
+// (Earlier tuning — 60 ms smoothing, 5/3.5 dB thresholds — treated ordinary
+// musical harmonics as resonances and cut 3–4 dB across clean dry music.)
 //
-// STFT (2048 Hann, hop 256). Per bin, the magnitude is smoothed over ~60 ms
+// STFT (2048 Hann, hop 256). Per bin, the magnitude is smoothed over ~1 s
 // (so only *sustained* peaks count, not transients) and compared with a
 // local spectral envelope: the mean power over ±⅓ octave. Where a bin stands
-// more than 5 dB above its surroundings (3.5 dB in 250–900 Hz, where stacked
-// effect copies ring on held vocal notes; range 150 Hz–4 kHz), its gain is
-// lowered by 0.8 dB per dB of excess, plus a cut that grows the longer the
-// peak persists (+8 dB/s), up to −12 dB; gains glide (40 ms down, 300 ms back)
+// more than 8 dB above its surroundings (6 dB in 250–900 Hz and 1–4 kHz, where stacked
+// effect copies ring on held vocal notes; range 150 Hz–5 kHz), its gain is
+// lowered by 0.5 dB per dB of excess, plus a cut that grows the longer the
+// peak persists (+3 dB/s), up to −12 dB; gains glide (40 ms down, 300 ms back)
 // and are smoothed across neighbouring bins. Only real gains are applied —
 // phases are untouched — so it can't add warble or stutter. With nothing
 // sticking out it is an exact pass-through (constant 2048-sample latency).
@@ -21,12 +23,14 @@ final class ResonanceTamer {
     private static let log2n = vDSP_Length(11)
     private static let frameRate = 44100.0 / Double(hop)
     private static let outScale = 1 / (2 * Float(n) * 3.0)
-    private static let kLo = Int(150.0 / 44100 * 2048), kHi = Int(4000.0 / 44100 * 2048)
+    private static let kLo = Int(150.0 / 44100 * 2048), kHi = Int(5000.0 / 44100 * 2048)
 
     private let fft = vDSP_create_fftsetup(ResonanceTamer.log2n, FFTRadix(kFFTRadix2))!
     private let window: UnsafeMutablePointer<Float>
     private let inBuf, accum, ready: [UnsafeMutablePointer<Float>]
     private let smPow, gain, persist: [UnsafeMutablePointer<Float>]     // per channel
+    // De-harsh: slow 1–4 kHz vs 200 Hz–1 kHz energy balance, per channel.
+    private var harshE = [Float](repeating: 0, count: 2), refE = [Float](repeating: 0, count: 2)
     private let frame, re, im, prefix, target: UnsafeMutablePointer<Float>
     private var fill = 0
 
@@ -70,7 +74,7 @@ final class ResonanceTamer {
 
         let P = smPow[ch], G = gain[ch], PS = persist[ch]
         let dt = Float(1 / Self.frameRate)
-        let pC = Float(1 - exp(-1 / (0.060 * Self.frameRate)))
+        let pC = Float(1 - exp(-1 / (1.0 * Self.frameRate)))
         let gDown = Float(1 - exp(-1 / (0.040 * Self.frameRate)))
         let gUp = Float(1 - exp(-1 / (0.300 * Self.frameRate)))
         for k in 1..<B { P[k] += pC * ((re[k] * re[k] + im[k] * im[k]) - P[k]) }
@@ -89,16 +93,43 @@ final class ResonanceTamer {
                 // More sensitive where stacked effect copies pile up on held
                 // vocal notes (250–900 Hz).
                 let hz = Float(k) * 44100 / Float(N)
-                let thresh: Float = (hz > 250 && hz < 900) ? 3.5 : 5
+                // …and 1–4 kHz, where the ear is most sensitive and stacked
+                // saturator harmonics pile up (piercing, whistly peaks).
+                let thresh: Float = (hz > 250 && hz < 900) || (hz > 1000 && hz < 4000) ? 6 : 8
                 if excessDb > thresh {
                     // Persistence: the longer a narrow peak keeps sticking out
                     // (a sustained note ringing), the deeper the cut grows
-                    // (+8 dB per second, up to −12 dB in total).
+                    // (+3 dB per second, up to −12 dB in total).
                     PS[k] = min(2, PS[k] + dt)
-                    let cutDb = min(12, (excessDb - thresh) * 0.8 + PS[k] * 8)
+                    let cutDb = min(12, (excessDb - thresh) * 0.5 + PS[k] * 3)
                     target[k] = powf(10, -cutDb / 20)
                 } else {
                     PS[k] = max(0, PS[k] - 2 * dt)
+                }
+            }
+        }
+        // De-harsh: a broad dynamic cut centred on ~2.2 kHz. When the 1–4 kHz
+        // band carries more energy than a natural (pink-ish) balance against
+        // 200 Hz–1 kHz — i.e. it has turned shrill, not merely loud — it is
+        // pulled down by 0.6 dB per dB over, up to −6 dB. Level-independent
+        // (a ratio), ~150 ms attack / 600 ms release, gains only.
+        if on {
+            var h: Float = 0, r: Float = 0
+            let k1 = Int(1000.0 / 44100 * Double(N)), k4 = Int(4000.0 / 44100 * Double(N)), k02 = Int(200.0 / 44100 * Double(N))
+            for k in k1...k4 { h += P[k] }
+            for k in k02..<k1 { r += P[k] }
+            let rise = harshE[ch] < h ? Float(0.04) : Float(0.01)
+            harshE[ch] += rise * (h - harshE[ch]); refE[ch] += 0.02 * (r - refE[ch])
+            if refE[ch] > 1e-12 {
+                // 1–4 kHz is 2 octaves vs 2.3 for the reference: pink balance ≈ −0.6 dB.
+                let overDb = 10 * log10f(max(harshE[ch], 1e-20) / refE[ch]) + 1
+                if overDb > 0 {
+                    let cut = min(6, overDb * 0.6)
+                    for k in (k1 / 2)...min(B - 1, k4 * 2) {
+                        let oct = log2f(Float(k) / Float(k1 * 2))       // 0 at ~2 kHz
+                        let w = max(0, 1 - abs(oct) / 1.6)
+                        target[k] = min(target[k], powf(10, -cut * w / 20))
+                    }
                 }
             }
         }
@@ -119,5 +150,51 @@ final class ResonanceTamer {
         accum[ch].assign(from: accum[ch] + H, count: N - H)
         vDSP_vclr(accum[ch] + (N - H), 1, vDSP_Length(H))
         inBuf[ch].assign(from: inBuf[ch] + H, count: N - H)
+    }
+}
+
+// MARK: - Stereo balancer
+
+/// Keeps the two ears equally loud. Choir voice panning, the blur engines'
+/// random phases, group-delay randomness and the reverb's independent L/R
+/// tails all wander, so for seconds at a time one side could sit a few dB
+/// louder. This tracks each side's loudness over ~3 s (K-weighting-ish
+/// high-pass so bass doesn't dominate) and trims the louder side / lifts
+/// the quieter one by up to ±3 dB, gliding slowly so it never pumps.
+/// The stereo image (width, placement of individual sounds) is untouched —
+/// only the long-term L/R level is evened out.
+final class StereoBalancer {
+    private var hpL = 0.0, hpR = 0.0, xL = 0.0, xR = 0.0
+    private var eL = 1e-6, eR = 1e-6
+    private var gL: Float = 1, gR: Float = 1
+    private let hpA = exp(-2 * Double.pi * 150 / 44100)
+    private let envA = 1 - exp(-1 / (3.0 * 44100))        // ~3 s loudness window
+    private static let maxDb = 3.0
+
+    func process(left l: UnsafeMutablePointer<Float>, right r: UnsafeMutablePointer<Float>, count n: Int) {
+        for i in 0..<n {
+            let a = Double(l[i]), b = Double(r[i])
+            hpL = hpA * (hpL + a - xL); xL = a
+            hpR = hpA * (hpR + b - xR); xR = b
+            eL += envA * (hpL * hpL - eL); eR += envA * (hpR * hpR - eR)
+        }
+        // Target: each side moved halfway toward the other (in dB), capped.
+        // Below ~-60 dBFS (silence, fades) hold the current gains.
+        var tL = gL, tR = gR
+        if max(eL, eR) > 1e-7 {
+            let diffDb = 10 * log10(max(eL, 1e-12) / max(eR, 1e-12))   // + = left louder
+            let c = max(-Self.maxDb, min(Self.maxDb, diffDb / 2))
+            tL = Float(pow(10, -c / 20)); tR = Float(pow(10, c / 20))
+        }
+        // Glide over this block (~0.5 s time constant) — no zipper noise.
+        let k = Float(1 - exp(-Double(n) / (0.5 * 44100)))
+        let nL = gL + (tL - gL) * k, nR = gR + (tR - gR) * k
+        let inv = 1 / Float(n)
+        for i in 0..<n {
+            let t = Float(i + 1) * inv
+            l[i] *= gL + (nL - gL) * t
+            r[i] *= gR + (nR - gR) * t
+        }
+        gL = nL; gR = nR
     }
 }

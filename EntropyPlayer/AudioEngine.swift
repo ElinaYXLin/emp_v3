@@ -85,6 +85,8 @@ final class AudioEngine {
     private let bandEQ           = FourBandEQ()
     private let postTube         = PostTubeSaturator()
     private let resonanceTamer   = ResonanceTamer()
+    private let stereoBalancer   = StereoBalancer()
+    private let murk             = MurkFilter()
     // Post reverb: after the final Tube saturator, on the finished sound.
     private let postReverb       = ConvolutionReverb()
     private var postReverbOn = false, lastPostDecay = -1.0
@@ -174,6 +176,7 @@ final class AudioEngine {
         compressor.setSampleRate(44100)
         reverbFilter.setSampleRate(44100)
         groupDelay.setSampleRate(44100)
+        groupDelay.setRandomness(Self.groupDelayRandomness)
 
         // Device buffer size first, then start the engine: resizing it after
         // start left the output unit with a stale 470-frame slice limit while
@@ -390,6 +393,7 @@ final class AudioEngine {
         shimmer.process(left: l, right: r, count: n)
         depth.process(left: l, right: r, count: n)
         glowGlue.process(left: l, right: r, count: n)
+        murk.process(left: l, right: r, count: n)
 
         eqFilter.process(l, count: n, channel: 0)
         eqFilter.process(r, count: n, channel: 1)
@@ -432,7 +436,7 @@ final class AudioEngine {
         postTube.process(left: l, right: r, count: n)
         if postReverbOn { postReverb.process(left: l, right: r, count: n) }
         // Pull down narrow resonances that build up from stacked effects.
-        resonanceTamer.process(left: l, right: r, count: n)
+        stereoBalancer.process(left: l, right: r, count: n)
         finalSub1.process(l, count: n, channel: 0); finalSub1.process(r, count: n, channel: 1)
         finalSub2.process(l, count: n, channel: 0); finalSub2.process(r, count: n, channel: 1)
         compressor.process(left: l, right: r, count: n)
@@ -443,6 +447,10 @@ final class AudioEngine {
         // Safety ceiling: catches any Post-Gain overs gracefully instead
         // of letting them hard-clip at the final hardware conversion.
         outputCeiling.process(left: l, right: r, count: n)
+        // Last: the resonance / 1–4 kHz tamer works on exactly what reaches
+        // the ears (after post-gain and the limiter). It only ever cuts, so
+        // it can't push the signal back over the ceiling.
+        resonanceTamer.process(left: l, right: r, count: n)
         // Listening-level meter taps the final output (read-only).
         listeningMeter.process(left: l, right: r, count: n)
     }
@@ -542,9 +550,12 @@ final class AudioEngine {
         groupDelay.setScale(Double(eff) * 20)
     }
 
-    /// Group delay randomness: effective 0–1 → ±0–50% drift around the scale.
-    func setGroupDelayRandomness(effective eff: Float) {
-        groupDelay.setRandomness(Double(eff) * 0.5)
+    /// Group delay drift is fixed at ±15% (the old GD Random knob is now Murk).
+    static let groupDelayRandomness = 0.15
+
+    /// Murk: effective 0–1 (bass masks the mids; see BlurEngines.swift).
+    func setMurk(effective eff: Float) {
+        murk.setStrength(Double(eff))
     }
 
     /// Grain echo: effective 0–1 scales the haze level (up to 0 dB re dry),

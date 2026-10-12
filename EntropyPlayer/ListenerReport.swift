@@ -61,7 +61,7 @@ extension AppState {
         let rollSlope = eff("rolloff") * 6
         let decaySec  = pow(eff("reverb"), 1.5) * 60
         let gdScale   = eff("gd") * 20
-        let gdRand    = eff("gdrand") * 50
+        let gdRand    = AudioEngine.groupDelayRandomness * 100
         let grain     = eff("grain")
         let grainMemMs = grain * 200
         let grainMixDb = grain > 0 ? 20 * log10(grain) : -Double.infinity
@@ -115,7 +115,7 @@ extension AppState {
             .init(title: "SPECTRAL HAZE", rows: [
                 .init(label: "Group delay",   value: String(format: "%.1f periods → %.0f ms @ 50 Hz, %.0f ms @ 100 Hz, %.1f ms @ 1 kHz", gdScale, gd50ms, gd100ms, gd1kms)),
                 .init(label: "Spectral smear", value: gdScale > 0 ? "±60% delay scatter per 1/12 octave" : "off"),
-                .init(label: "Delay drift",   value: String(format: "±%.0f%%, 3–6 s glides", gdRand)),
+                .init(label: "Delay drift",   value: String(format: "±%.0f%% (fixed), 3–6 s glides", gdRand)),
                 .init(label: "Spectral scatter", value: blur > 0.001
                       ? String(format: "%.0f%%: bands echoed at 30–%.0f ms, feedback %.0f%%", blur * 100, 30 + 388 * (0.25 + 0.75 * blur), 50 * blur)
                       : "off"),
