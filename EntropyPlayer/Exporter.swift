@@ -22,7 +22,7 @@ final class OfflineChain {
     static let sampleRate = 44100.0
     /// Fixed latency of the chain: group delay (512 + 64), spectral blur
     /// (2048), tape sag (88), wow & flutter centre delay (88).
-    static let latency = 512 + 64 + 2048 + 88 + TapeWowFlutter.latency + MelodyBlur.latency + 3 * 2048 + LookaheadLimiter.latency + ResonanceTamer.latency
+    static let latency = 512 + 64 + 2048 + 88 + TapeWowFlutter.latency + MelodyBlur.latency + 3 * 2048 + LookaheadLimiter.latency + ResonanceTamer.latency + RingGuard.latency
 
     private let s: ChainSettings
     private let gd = GroupDelay(), bl = SpectralBlur(), gr = GrainEcho(), ch = Choir()
@@ -33,8 +33,9 @@ final class OfflineChain {
     private let wf = TapeWowFlutter(), er = TapeSelfErasure()
     private let fs1 = SubsonicFilter(), fs2 = SubsonicFilter()
     private let gl = GlowGlue(), gt = Grit(), mb = MelodyBlur(), smr = SmearBlur(), swl = SwellBlur(), smk = SmokeBlur(), uw = UnderwaterBlur()
-    private let dp = Depth(), beq = FourBandEQ(), pt = PostTubeSaturator(), rt = ResonanceTamer(), sb = StereoBalancer(), mk = MurkFilter(), prv = ConvolutionReverb()
+    private let dp = Depth(), beq = FourBandEQ(), pt = PostTubeSaturator(), rt = ResonanceTamer(), sb = StereoBalancer(), mk = MurkFilter(), rg = RingGuard(), prv = ConvolutionReverb()
     private let dyn = WebAudioCompressor(), ceiling = LookaheadLimiter()
+    private let dry = UnsafeMutablePointer<Float>.allocate(capacity: 470)
     private let inGain: Float, fixedDrive: Float, postGain: Float
 
     init(_ s: ChainSettings) {
@@ -71,7 +72,7 @@ final class OfflineChain {
         var done = 0
         while done < total {
             let n = min(470, total - done), a = l + done, b = r + done
-            for i in 0..<n { a[i] *= inGain; b[i] *= inGain }
+            for i in 0..<n { a[i] *= inGain; b[i] *= inGain; dry[i] = (a[i] + b[i]) * 0.5 }
             ch.process(left: a, right: b, count: n)
             mb.process(left: a, right: b, count: n)
             smr.process(left: a, right: b, count: n)
@@ -111,6 +112,7 @@ final class OfflineChain {
             beq.process(a, count: n, channel: 0); beq.process(b, count: n, channel: 1)
             pt.process(left: a, right: b, count: n)
             if s.postReverb > 0.001 { prv.process(left: a, right: b, count: n) }
+            rg.process(left: a, right: b, dry: dry, count: n)
             sb.process(left: a, right: b, count: n)
             fs1.process(a, count: n, channel: 0); fs1.process(b, count: n, channel: 1)
             fs2.process(a, count: n, channel: 0); fs2.process(b, count: n, channel: 1)

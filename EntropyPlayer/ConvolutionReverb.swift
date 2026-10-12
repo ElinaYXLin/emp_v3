@@ -91,12 +91,14 @@ final class ConvolutionReverb {
     /// compensation). The post-tube reverb uses dry 1, wet by strength.
     private var dryGain: Float = 0.6, wetGain: Float = 0.8, outGain: Float = ConvolutionReverb.levelComp
     func setMix(dry: Float, wet: Float, out: Float) { lock.lock(); dryGain = dry; wetGain = wet; outGain = out; lock.unlock() }
-    /// Main reverb dial: 0 = fully off (dry only, exact bypass), fading up to
-    /// the full 0.6 dry / 0.8 wet mix by 15 % so the low end of the dial
-    /// doesn't jump. Without this the 0.8 wet path (with the style's
-    /// pre-delay and colour) stayed on at 0.
+    /// Main reverb dial: 0 = fully off (dry only, exact bypass). The wet mix
+    /// now grows across the dial, reaching the full 0.6 dry / 0.8 wet only at
+    /// an effective 0.5 (e.g. 100 % sensitivity × 50 % macro). It used to hit
+    /// almost full mix by 0.15 — 50 % × 50 % (effective 0.125, the knob is
+    /// quadratic) already swapped a third of the song for wash, and the
+    /// dial only changed the tail length from there.
     func setAmount(_ eff: Double) {
-        let w = Float(max(0, min(1, eff / 0.15)))
+        let w = Float(max(0, min(1, eff / 0.5)))
         setMix(dry: 1 - 0.4 * w, wet: 0.8 * w, out: 1 + (Self.levelComp - 1) * w)
     }
     // Gains actually applied, ramped toward the targets each chunk (no zipper/clicks).

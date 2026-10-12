@@ -100,11 +100,19 @@ final class ResonanceTamer {
                     // Persistence: the longer a narrow peak keeps sticking out
                     // (a sustained note ringing), the deeper the cut grows
                     // (+3 dB per second, up to −12 dB in total).
-                    PS[k] = min(2, PS[k] + dt)
-                    let cutDb = min(12, (excessDb - thresh) * 0.5 + PS[k] * 3)
-                    target[k] = powf(10, -cutDb / 20)
+                    // Only peaks that stay at the same frequency for > 1.5 s
+                    // are treated as resonances. A played note is also a
+                    // narrow peak; cutting it as soon as it stuck out dipped
+                    // and released every slow piano note — which itself
+                    // sounded like ringing. Real effect resonances sit at a
+                    // fixed frequency across many notes, so they still build up.
+                    PS[k] = min(4, PS[k] + dt)
+                    if PS[k] > 1.5 {
+                        let cutDb = min(12, (excessDb - thresh) * 0.5 + (PS[k] - 1.5) * 3)
+                        target[k] = powf(10, -cutDb / 20)
+                    }
                 } else {
-                    PS[k] = max(0, PS[k] - 2 * dt)
+                    PS[k] = max(0, PS[k] - 0.5 * dt)
                 }
             }
         }
@@ -196,5 +204,141 @@ final class StereoBalancer {
             r[i] *= gR + (nR - gR) * t
         }
         gL = nL; gR = nR
+    }
+}
+
+// MARK: - Ring guard
+
+/// Stops notes from "resonating": after a sound stops in the *original*
+/// audio, whatever the effects leave behind around that pitch (Wash cloud,
+/// Underwater, Smear, Scatter, reverbs — which, being in series, extend each
+/// other's tails) must die away at least at a natural room's rate.
+///
+/// STFT (2048 / hop 256) on the processed signal and on the dry input
+/// (delayed by the chain's latency up to this point). Per bin, the dry power
+/// — smoothed over ±⅓ octave, and also taken an octave up so Shimmer/Depth
+/// undertones count as "explained" — feeds an envelope with instant attack,
+/// 60 ms hold and a 50 dB/s fall (≈ 1.2 s RT60). Processed energy may sit
+/// up to 3 dB above that envelope (scaled by the chain's long-term gain, so
+/// "as loud as the source" is measured at this point's normal level); anything beyond is pulled down (gains
+/// only, glided 20 ms down / 120 ms up). Held notes are untouched — the dry
+/// input still carries them — and level-independent (ratios only).
+final class RingGuard {
+    static let latency = 2048
+    /// Chain latency from the dry tap to this stage (STFT blurs, group delay,
+    /// tape sag, wow & flutter, Murk).
+    static let upstreamLatency = 512 + 64 + 2048 + 88 + 88 + MelodyBlur.latency + 3 * 2048
+    private static let n = 2048, hop = 256, bins = 1024
+    private static let log2n = vDSP_Length(11)
+    private static let frameRate = 44100.0 / Double(hop)
+    private static let outScale = 1 / (2 * Float(n) * 3.0)
+    private static let dlySize = 16384
+
+    private let fft = vDSP_create_fftsetup(RingGuard.log2n, FFTRadix(kFFTRadix2))!
+    private let window: UnsafeMutablePointer<Float>
+    private let inBuf, accum, ready, dryBuf: [UnsafeMutablePointer<Float>]
+    private let env, hold, gain: [UnsafeMutablePointer<Float>]
+    private let frame, re, im, dre, dim, pDry, pOut, prefix: UnsafeMutablePointer<Float>
+    private let dly = UnsafeMutablePointer<Float>.allocate(capacity: RingGuard.dlySize)
+    private var dlyW = 0
+    // Long-term (≈3 s) processed vs dry power: the chain's normal gain here.
+    private var longOut: Float = 1e-12, longDry: Float = 1e-12
+    private var fill = 0
+
+    init() {
+        func buf(_ c: Int, _ v: Float = 0) -> UnsafeMutablePointer<Float> {
+            let p = UnsafeMutablePointer<Float>.allocate(capacity: c); p.initialize(repeating: v, count: c); return p
+        }
+        let n = Self.n, b = Self.bins
+        window = buf(n); vDSP_hann_window(window, vDSP_Length(n), Int32(vDSP_HANN_DENORM))
+        inBuf = [buf(n), buf(n)]; accum = [buf(n), buf(n)]; ready = [buf(Self.hop), buf(Self.hop)]; dryBuf = [buf(n)]
+        env = [buf(b), buf(b)]; hold = [buf(b), buf(b)]; gain = [buf(b, 1), buf(b, 1)]
+        frame = buf(n); re = buf(b); im = buf(b); dre = buf(b); dim = buf(b); pDry = buf(b); pOut = buf(b); prefix = buf(b + 1)
+        dly.initialize(repeating: 0, count: Self.dlySize)
+    }
+
+    /// `dry` is the mono dry input for these samples (undelayed; delayed here).
+    func process(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>,
+                 dry: UnsafePointer<Float>, count: Int) {
+        let H = Self.hop, N = Self.n, D = Self.upstreamLatency, mask = Self.dlySize - 1
+        for i in 0..<count {
+            dly[dlyW & mask] = dry[i]
+            let dd = dly[(dlyW &- D) & mask]
+            dlyW &+= 1
+            let l = left[i], r = right[i]
+            left[i] = ready[0][fill]; right[i] = ready[1][fill]
+            inBuf[0][N - H + fill] = l; inBuf[1][N - H + fill] = r
+            dryBuf[0][N - H + fill] = dd
+            fill += 1
+            if fill == H { fill = 0; frameStep() }
+        }
+    }
+
+    private func forward(_ src: UnsafeMutablePointer<Float>, _ r: UnsafeMutablePointer<Float>, _ m: UnsafeMutablePointer<Float>) {
+        vDSP_vmul(src, 1, window, 1, frame, 1, vDSP_Length(Self.n))
+        var split = DSPSplitComplex(realp: r, imagp: m)
+        frame.withMemoryRebound(to: DSPComplex.self, capacity: Self.bins) { vDSP_ctoz($0, 2, &split, 1, vDSP_Length(Self.bins)) }
+        vDSP_fft_zrip(fft, &split, 1, Self.log2n, FFTDirection(kFFTDirection_Forward))
+    }
+
+    /// ±⅓-octave smoothed power into `dst` from `re`/`im`.
+    private func smoothPower(_ r: UnsafeMutablePointer<Float>, _ m: UnsafeMutablePointer<Float>, into dst: UnsafeMutablePointer<Float>) {
+        let B = Self.bins
+        prefix[0] = 0
+        for k in 0..<B { prefix[k + 1] = prefix[k] + (k == 0 ? 0 : r[k] * r[k] + m[k] * m[k]) }
+        for k in 1..<B {
+            let w = max(2, Int(Float(k) * 0.26))
+            let lo = max(1, k - w), hi = min(B - 1, k + w)
+            dst[k] = (prefix[hi + 1] - prefix[lo]) / Float(hi - lo + 1)
+        }
+    }
+
+    private func frameStep() {
+        let N = Self.n, H = Self.hop, B = Self.bins
+        // Dry reference envelope (shared by both channels).
+        forward(dryBuf[0], dre, dim)
+        smoothPower(dre, dim, into: pDry)
+        let fall = powf(10, -50 / 10 / Float(Self.frameRate))     // 50 dB/s
+        let holdFrames = Float(0.06 * Self.frameRate)
+        let E = env[0], HD = hold[0]
+        for k in 1..<B {
+            // Undertones: energy an octave up explains energy here.
+            let ref = max(pDry[k], 2 * k < B ? pDry[2 * k] : 0)
+            if ref >= E[k] { E[k] = ref; HD[k] = holdFrames }
+            else if HD[k] > 0 { HD[k] -= 1 }
+            else { E[k] = max(ref, E[k] * fall) }
+        }
+        // Chain gain: what "as loud as the source" means at this point.
+        var sumDry: Float = 0, sumOut: Float = 0
+        for k in 1..<B { sumDry += pDry[k] }
+        let lc = Float(1 - exp(-1 / (3.0 * Self.frameRate)))
+        let gDown = Float(1 - exp(-1 / (0.020 * Self.frameRate)))
+        let gUp = Float(1 - exp(-1 / (0.120 * Self.frameRate)))
+        for ch in 0..<2 {
+            forward(inBuf[ch], re, im)
+            smoothPower(re, im, into: pOut)
+            let G = gain[ch]
+            if ch == 0 { for k in 1..<B { sumOut += pOut[k] } }
+            let chainGain = max(1, longOut / max(longDry, 1e-20))
+            for k in 1..<B {
+                let allowed = 2 * E[k] * chainGain                     // +3 dB over the source, at the chain's gain
+                let t = pOut[k] > allowed && pOut[k] > 1e-14 ? (allowed / pOut[k]).squareRoot() : 1
+                G[k] += (t < G[k] ? gDown : gUp) * (t - G[k])
+                re[k] *= G[k]; im[k] *= G[k]
+            }
+            var split = DSPSplitComplex(realp: re, imagp: im)
+            vDSP_fft_zrip(fft, &split, 1, Self.log2n, FFTDirection(kFFTDirection_Inverse))
+            frame.withMemoryRebound(to: DSPComplex.self, capacity: B) { vDSP_ztoc(&split, 1, $0, 2, vDSP_Length(B)) }
+            var scale = Self.outScale
+            vDSP_vsmul(frame, 1, &scale, frame, 1, vDSP_Length(N))
+            vDSP_vmul(frame, 1, window, 1, frame, 1, vDSP_Length(N))
+            vDSP_vadd(accum[ch], 1, frame, 1, accum[ch], 1, vDSP_Length(N))
+            ready[ch].assign(from: accum[ch], count: H)
+            accum[ch].assign(from: accum[ch] + H, count: N - H)
+            vDSP_vclr(accum[ch] + (N - H), 1, vDSP_Length(H))
+            inBuf[ch].assign(from: inBuf[ch] + H, count: N - H)
+        }
+        dryBuf[0].assign(from: dryBuf[0] + H, count: N - H)
+        if sumDry > 1e-10 { longDry += lc * (sumDry - longDry); longOut += lc * (sumOut - longOut) }
     }
 }

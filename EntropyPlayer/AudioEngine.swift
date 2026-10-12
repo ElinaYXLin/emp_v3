@@ -59,6 +59,8 @@ final class AudioEngine {
     private let dspRing = JitterRing(primeFrames: 4410 + 6615, maxFrames: 4410 * 4 + 6615)
     private static let maxRenderFrames = 4096
     private var scratchL = [Float](repeating: 0, count: AudioEngine.maxRenderFrames)
+    private let dryTap = UnsafeMutablePointer<Float>.allocate(capacity: AudioEngine.maxRenderFrames)
+    private let ringGuard = RingGuard()
     private var scratchR = [Float](repeating: 0, count: AudioEngine.maxRenderFrames)
 
     // Custom convolution reverb (see ConvolutionReverb.swift): replaces
@@ -374,6 +376,8 @@ final class AudioEngine {
 
     /// The full DSP chain, in place, on the render thread.
     private func renderChain(left l: UnsafeMutablePointer<Float>, right r: UnsafeMutablePointer<Float>, count n: Int) {
+        // Mono dry reference for the ring guard.
+        for i in 0..<n { dryTap[i] = (l[i] + r[i]) * 0.5 }
         // Emulation › Choir and the Blur section first, then the Effects
         // page in EMP_V2's order. The rest of Emulation (tape, tube amp) follows.
         choir.process(left: l, right: r, count: n)
@@ -435,6 +439,8 @@ final class AudioEngine {
         bandEQ.process(l, count: n, channel: 0); bandEQ.process(r, count: n, channel: 1)
         postTube.process(left: l, right: r, count: n)
         if postReverbOn { postReverb.process(left: l, right: r, count: n) }
+        // Lingering effects may not outlast the source by more than a room would.
+        ringGuard.process(left: l, right: r, dry: dryTap, count: n)
         // Pull down narrow resonances that build up from stacked effects.
         stereoBalancer.process(left: l, right: r, count: n)
         finalSub1.process(l, count: n, channel: 0); finalSub1.process(r, count: n, channel: 1)
