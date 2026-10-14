@@ -260,7 +260,7 @@ final class SwellBlur {
 //     detail the bass would "nearly" hide is hidden.
 //  3. Low-mid bloom: up to +6 dB around 150–400 Hz, backed off when that
 //     band is already heavy (slow, ~400 ms) — woolly, behind-a-wall warmth.
-//  Plus a high darkening (−4 dB/oct above 2 kHz at full) and a haze fog:
+//  Plus bass harmonic bleed (see process) and a high darkening (−4 dB/oct above 2 kHz at full) and a haze fog:
 //     removed mid detail returns smeared in pitch and time.
 // Gains glided per bin; the fog adds drifting phases. Exact pass-through at 0.
 final class MurkFilter: BlurSTFT {
@@ -290,6 +290,45 @@ final class MurkFilter: BlurSTFT {
         }
     }
     override func idle(_ ch: Int) { for k in 0..<Self.bins { G[ch][k] = 1 }; makeup[ch] = 1 }
+
+    // Bass harmonic bleed: the bass (< ~150 Hz) is split off, normalized by
+    // its own envelope (so it's level-independent), pushed through an
+    // asymmetric tanh, and only the *added* overtones (2nd–5th, band-limited
+    // to ~90–600 Hz) are mixed back, up to about the bass.s own level at full
+    // strength. The bass spreads upward into a thick, woolly low-mid layer —
+    // an overdriven bass amp in a small room. Runs before the STFT, so the
+    // duck / mask / bloom then shape it with everything else.
+    private var bLP1: [Float] = [0, 0], bLP2: [Float] = [0, 0], bEnv: [Float] = [1e-4, 1e-4]
+    private var hHP: [Float] = [0, 0], hHPx: [Float] = [0, 0], hLP1: [Float] = [0, 0], hLP2: [Float] = [0, 0]
+    private static let cBass = Float(1 - exp(-2 * Double.pi * 150 / 44100))
+    private static let cHP = Float(exp(-2 * Double.pi * 90 / 44100))
+    private static let cTop = Float(1 - exp(-2 * Double.pi * 600 / 44100))
+    private static let cEnv = Float(1 - exp(-1 / (0.05 * 44100)))
+    private static let bias: Float = 0.35
+    private static let tb = tanhf(bias), slope0 = 1 - tanhf(bias) * tanhf(bias)
+
+    override func process(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>, count: Int) {
+        let amt = max(strength, targetStrength)
+        if amt > 1e-4 {
+            for ch in 0..<2 {
+                let x = ch == 0 ? left : right
+                var l1 = bLP1[ch], l2 = bLP2[ch], e = bEnv[ch], hp = hHP[ch], hx = hHPx[ch], t1 = hLP1[ch], t2 = hLP2[ch]
+                let mix = 2.2 * strength
+                for i in 0..<count {
+                    l1 += Self.cBass * (x[i] - l1); l2 += Self.cBass * (l1 - l2)
+                    e += Self.cEnv * (abs(l2) - e)
+                    let ref = max(e, 1e-5)
+                    let u = 2.2 * l2 / (ref * 1.6)                     // ~±2 at the bass's peaks
+                    let h = (tanhf(u + Self.bias) - Self.tb) - Self.slope0 * u   // overtones only
+                    hp = Self.cHP * (hp + h - hx); hx = h               // drop DC / fundamental-ish lows
+                    t1 += Self.cTop * (hp - t1); t2 += Self.cTop * (t1 - t2)
+                    x[i] += mix * t2 * ref * 1.6
+                }
+                bLP1[ch] = l1; bLP2[ch] = l2; bEnv[ch] = e; hHP[ch] = hp; hHPx[ch] = hx; hLP1[ch] = t1; hLP2[ch] = t2
+            }
+        }
+        super.process(left: left, right: right, count: count)
+    }
     override func spectrum(_ ch: Int) {
         let B = Self.bins, s = strength, g = G[ch]
         var total: Float = 1e-20, bass: Float = 0, bloomBand: Float = 0, kIn: Float = 1e-20

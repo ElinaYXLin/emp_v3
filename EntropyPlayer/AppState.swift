@@ -78,6 +78,8 @@ final class AppState: ObservableObject {
     @Published var exportStatus: String? = nil
     @Published var selectedPreset: String = GlobalPreset.initName
     @Published var selectedEmuPreset: String = EmulationPreset.offName
+    @Published var selectedTexPreset: String = TexturePreset.offName
+    @Published var selectedSuite: String = SuitePreset.noneName
     @Published var dynamicsMode: AudioEngine.DynamicsMode = .limiter
     @Published var macroMode: MacroMode = .manual
     @Published var vibratoSpeed: VibratoSpeed = .slow
@@ -369,26 +371,47 @@ final class AppState: ObservableObject {
 
     // MARK: - Presets
 
-    func applyPreset(named name: String) {
+    func applyPreset(named name: String, fromSuite: Bool = false) {
         guard let p = GlobalPreset.named(name) else { return }
         selectedPreset = p.name
-        // FX knobs only; the Emulation page keeps its settings.
+        if !fromSuite { selectedSuite = SuitePreset.noneName }
+        // Effects-section knobs only; Emulation and Texture keep their settings.
         let defaults = AppSettings().ranges
         for (k, v) in p.sensitivity where k != GlobalPreset.postTubeKey {
             sensitivity[k] = v; ranges[k] = defaults[k] ?? .init()
         }
         satRecipe = p.recipe
+        reverbStyle = p.style
         postTube = p.sensitivity[GlobalPreset.postTubeKey] ?? 0
         if macroMode != .manual { setMacroMode(.manual) }
         setMacro(p.macro)
     }
 
     /// Emulation knobs only; FX knobs, recipe and macro are untouched.
-    func applyEmulationPreset(named name: String) {
+    func applyEmulationPreset(named name: String, fromSuite: Bool = false) {
         guard let p = EmulationPreset.named(name) else { return }
         selectedEmuPreset = p.name
+        if !fromSuite { selectedSuite = SuitePreset.noneName }
         for (k, v) in p.sensitivity { sensitivity[k] = v; ranges[k] = .init() }
         applyAllDSP()
+    }
+
+    /// Blur + Grit knobs only.
+    func applyTexturePreset(named name: String, fromSuite: Bool = false) {
+        guard let p = TexturePreset.named(name) else { return }
+        selectedTexPreset = p.name
+        if !fromSuite { selectedSuite = SuitePreset.noneName }
+        for (k, v) in p.sensitivity { sensitivity[k] = v; ranges[k] = .init() }
+        applyAllDSP()
+    }
+
+    /// A suite sets all three: FX (incl. macro), Emulation and Texture.
+    func applySuite(named name: String) {
+        guard let p = SuitePreset.named(name) else { selectedSuite = SuitePreset.noneName; return }
+        applyEmulationPreset(named: p.emulation, fromSuite: true)
+        applyTexturePreset(named: p.texture, fromSuite: true)
+        applyPreset(named: p.fx, fromSuite: true)
+        selectedSuite = p.name
     }
 
     func setRecipe(_ name: String) {

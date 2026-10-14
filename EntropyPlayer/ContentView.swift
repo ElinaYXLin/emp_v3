@@ -81,8 +81,10 @@ struct ContentView: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: 8) {
+                suitePicker
                 presetPicker
                 emuPresetPicker
+                texPresetPicker
                 Spacer(minLength: 0)
             }
             HStack(spacing: 8) {
@@ -119,8 +121,10 @@ struct ContentView: View {
     var row2: some View {
             HStack(spacing: 8) {
                 Group {
+                    suitePicker
                     presetPicker
                     emuPresetPicker
+                    texPresetPicker
                     Divider().frame(height: 22)
                     qualityToggle
                     Divider().frame(height: 22)
@@ -294,6 +298,42 @@ struct ContentView: View {
             .labelsHidden()
             .pickerStyle(.menu)
             .frame(width: 220)
+        }
+    }
+
+    var texPresetPicker: some View {
+        HStack(spacing: 4) {
+            Text("TEXTURE").font(.system(size: 9, design: .monospaced)).foregroundColor(Color(hex:"#8f8778"))
+                .fixedSize()
+            Picker("", selection: Binding(get: { app.selectedTexPreset }, set: { app.applyTexturePreset(named: $0) })) {
+                Text(TexturePreset.offName).tag(TexturePreset.offName)
+                ForEach(TexturePreset.Vibe.allCases, id: \.self) { vibe in
+                    Section(header: Text(vibe.rawValue.uppercased())) {
+                        ForEach(TexturePreset.presets(in: vibe), id: \.name) { p in Text(p.name).tag(p.name) }
+                    }
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 180)
+        }
+    }
+
+    var suitePicker: some View {
+        HStack(spacing: 4) {
+            Text("SUITE").font(.system(size: 9, design: .monospaced)).foregroundColor(Color(hex:"#8f8778"))
+                .fixedSize()
+            Picker("", selection: Binding(get: { app.selectedSuite }, set: { app.applySuite(named: $0) })) {
+                Text(SuitePreset.noneName).tag(SuitePreset.noneName)
+                ForEach(SuitePreset.Vibe.allCases, id: \.self) { vibe in
+                    Section(header: Text(vibe.rawValue.uppercased())) {
+                        ForEach(SuitePreset.presets(in: vibe), id: \.name) { p in Text(p.name).tag(p.name) }
+                    }
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 240)
         }
     }
 

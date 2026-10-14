@@ -17,6 +17,8 @@ struct SessionState: Codable {
     var satRecipe = SaturatorRecipe.classic.name
     var selectedPreset = GlobalPreset.initName
     var selectedEmuPreset = EmulationPreset.offName
+    var selectedTexPreset: String?     // optional: older sessions lack these
+    var selectedSuite: String?
     var dynamics = "limiter"
     var vibrato = false
     var vibratoFast = false
@@ -47,6 +49,7 @@ extension AppState {
         s.sensitivity = sensitivity; s.ranges = ranges
         s.satRecipe = satRecipe
         s.selectedPreset = selectedPreset; s.selectedEmuPreset = selectedEmuPreset
+        s.selectedTexPreset = selectedTexPreset; s.selectedSuite = selectedSuite
         s.dynamics = dynamicsMode == .limiter ? "limiter" : "compressor"
         s.vibrato = macroMode == .vibrato; s.vibratoFast = vibratoSpeed == .fast
         s.waveColor = waveColor.hexString
@@ -62,6 +65,7 @@ extension AppState {
         ranges      = AppSettings().ranges.merging(s.ranges) { _, new in new }
         satRecipe   = s.satRecipe
         selectedPreset = s.selectedPreset; selectedEmuPreset = s.selectedEmuPreset
+        selectedTexPreset = s.selectedTexPreset ?? TexturePreset.offName; selectedSuite = s.selectedSuite ?? SuitePreset.noneName
         waveColor   = Color(hex: s.waveColor)
         dynamicsMode = s.dynamics == "compressor" ? .compressor : .limiter
         audio.setDynamics(mode: dynamicsMode)
