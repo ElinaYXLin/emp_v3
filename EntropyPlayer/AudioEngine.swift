@@ -268,7 +268,14 @@ final class AudioEngine {
         // the raw EarPods AUHAL separately — restarting a fresh capture
         // session is the correct recovery there, not restarting the main
         // engine's normal hardware I/O.
-        guard !isSystemCapture else { return }
+        if isSystemCapture {
+            // Sleep/wake or a device change restarts both devices' I/O, so the
+            // ring between them is left with stale timing (positions, learned
+            // clock correction, buffer sizes) — it then runs dry over and over:
+            // rapid clicking. Rebuild the capture session from scratch.
+            restartSystemCapture(reason: "hardware change / wake")
+            return
+        }
         let wasPlaying = player.isPlaying
         engine.stop()
         applyPlaybackOutputDevice()
@@ -928,6 +935,18 @@ final class AudioEngine {
             self.vizLock.lock(); let snap = self.vizSnapshot; self.vizLock.unlock()
             self.onSamples?(snap)
             self.diagTicks += 1
+            // Self-heal: more than 6 ring underruns within 2 s means the
+            // bridge has lost sync (e.g. after sleep) — rebuild it, at most
+            // once per 20 s.
+            self.underrunWatchTicks += 1
+            if self.underrunWatchTicks >= 40 {
+                let u = self.captureRing.underruns
+                if u - self.underrunWatch > 6, Date().timeIntervalSince(self.lastCaptureRestart) > 20 {
+                    self.restartSystemCapture(reason: "repeated dropouts")
+                    return
+                }
+                self.underrunWatch = u; self.underrunWatchTicks = 0
+            }
             if self.diagTicks % (20 * 60) == 0 {
                 let u = self.captureRing.underruns, o = self.captureRing.overflows
                 if u + o + self.captureRenderFailures + self.captureOversized + self.captureOverloads > 0 {
@@ -946,6 +965,7 @@ final class AudioEngine {
                 self.captureRenderFailures = 0; self.captureOversized = 0
                 self.captureOverloads = 0; self.captureMaxLoad = 0
                 self.captureRing.underruns = 0; self.captureRing.overflows = 0
+                self.underrunWatch = 0
             }
         }
     }
@@ -1008,6 +1028,23 @@ final class AudioEngine {
             AudioObjectRemovePropertyListenerBlock(dev, &Self.rateAddr, DispatchQueue.main, block)
         }
         rateListener = nil
+    }
+
+    private var lastCaptureRestart = Date.distantPast
+    private var underrunWatch = 0, underrunWatchTicks = 0
+
+    private func restartSystemCapture(reason: String) {
+        guard isSystemCapture, let d = captureDevices else { return }
+        lastCaptureRestart = Date()
+        NSLog("[EntropyPlayer] Restarting System capture (%@)", reason)
+        do { try startSystemCapture(inputDeviceID: d.input, outputDeviceID: d.output) }
+        catch {
+            // Devices may still be settling after wake — try once more.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self else { return }
+                try? self.startSystemCapture(inputDeviceID: d.input, outputDeviceID: d.output)
+            }
+        }
     }
 
     private func nominalRate(_ dev: AudioDeviceID) -> Double {
