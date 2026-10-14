@@ -227,7 +227,7 @@ final class RingGuard {
     static let latency = 2048
     /// Chain latency from the dry tap to this stage (STFT blurs, group delay,
     /// tape sag, wow & flutter, Murk).
-    static let upstreamLatency = 512 + 64 + 2048 + 88 + 88 + MelodyBlur.latency + 3 * 2048
+    static let upstreamLatency = 512 + 64 + 2048 + 88 + TapeWowFlutter.latency + MelodyBlur.latency + 3 * 2048
     private static let n = 2048, hop = 256, bins = 1024
     private static let log2n = vDSP_Length(11)
     private static let frameRate = 44100.0 / Double(hop)

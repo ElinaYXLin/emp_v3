@@ -372,9 +372,17 @@ final class AppState: ObservableObject {
     // MARK: - Presets
 
     func applyPreset(named name: String, fromSuite: Bool = false) {
+        if !fromSuite { selectedSuite = SuitePreset.customName }
+        if name == GlobalPreset.noneName {
+            // Every Effects-section knob (and the Tube) to 0; the macro stays.
+            selectedPreset = name
+            for k in GlobalPreset.effectKeys { sensitivity[k] = 0; ranges[k] = .init() }
+            postTube = 0
+            applyAllDSP()
+            return
+        }
         guard let p = GlobalPreset.named(name) else { return }
         selectedPreset = p.name
-        if !fromSuite { selectedSuite = SuitePreset.noneName }
         // Effects-section knobs only; Emulation and Texture keep their settings.
         let defaults = AppSettings().ranges
         for (k, v) in p.sensitivity where k != GlobalPreset.postTubeKey {
@@ -391,7 +399,7 @@ final class AppState: ObservableObject {
     func applyEmulationPreset(named name: String, fromSuite: Bool = false) {
         guard let p = EmulationPreset.named(name) else { return }
         selectedEmuPreset = p.name
-        if !fromSuite { selectedSuite = SuitePreset.noneName }
+        if !fromSuite { selectedSuite = SuitePreset.customName }
         for (k, v) in p.sensitivity { sensitivity[k] = v; ranges[k] = .init() }
         applyAllDSP()
     }
@@ -400,14 +408,23 @@ final class AppState: ObservableObject {
     func applyTexturePreset(named name: String, fromSuite: Bool = false) {
         guard let p = TexturePreset.named(name) else { return }
         selectedTexPreset = p.name
-        if !fromSuite { selectedSuite = SuitePreset.noneName }
+        if !fromSuite { selectedSuite = SuitePreset.customName }
         for (k, v) in p.sensitivity { sensitivity[k] = v; ranges[k] = .init() }
         applyAllDSP()
     }
 
     /// A suite sets all three: FX (incl. macro), Emulation and Texture.
     func applySuite(named name: String) {
-        guard let p = SuitePreset.named(name) else { selectedSuite = SuitePreset.noneName; return }
+        if name == SuitePreset.customName { return }          // display only
+        if name == SuitePreset.noneName {
+            // Everything to 0 (all three sections); the macro stays.
+            applyPreset(named: GlobalPreset.noneName, fromSuite: true)
+            applyEmulationPreset(named: EmulationPreset.offName, fromSuite: true)
+            applyTexturePreset(named: TexturePreset.offName, fromSuite: true)
+            selectedSuite = SuitePreset.noneName
+            return
+        }
+        guard let p = SuitePreset.named(name) else { return }
         applyEmulationPreset(named: p.emulation, fromSuite: true)
         applyTexturePreset(named: p.texture, fromSuite: true)
         applyPreset(named: p.fx, fromSuite: true)

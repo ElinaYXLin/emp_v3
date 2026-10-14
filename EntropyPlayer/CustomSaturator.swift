@@ -82,7 +82,7 @@ final class WebAudioSaturator {
     /// most expensive stage. Max error ≈ 2 % near the knee; inaudible as
     /// a level change, slightly different harmonic balance at high drive.
     // Wobble (even voicing): the bias drifts to a random destination in
-    // ±wobble over a random 20–100 s, then picks the next. A rising bias also
+    // ±wobble over a random 3–10 s (was 20–100 s — too slow to hear), then picks the next. A rising bias also
     // closes a 2-pole low-pass on the saturator's output (20 kHz → ~2.5 kHz
     // at +1 bias shift); falling bias leaves it open. Wobble 0 is exact.
     private var wobble = 0.0
@@ -105,7 +105,7 @@ final class WebAudioSaturator {
         if wobPos >= wobLen {
             wobPos = 0; wobFrom = wobTo
             wobTo = wobRand() * 2 - 1
-            wobLen = (20 + 80 * wobRand()) * Self.sampleRate
+            wobLen = (3 + 7 * wobRand()) * Self.sampleRate
         }
         let e = 0.5 - 0.5 * cos(Double.pi * wobPos / wobLen)
         wobShift = amount * (wobFrom + (wobTo - wobFrom) * e)

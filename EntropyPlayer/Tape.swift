@@ -13,8 +13,9 @@ import Foundation
 // building block) followed by tanh saturation. Loop widths scale with the
 // signal's own envelope, mimicking AC bias: quiet passages stay clean
 // instead of getting stuck in a dead zone, and the loop keeps the same
-// shape at every level. A strength-dependent head bump (+2.5 dB @ 90 Hz)
-// and gentle top-end loss complete the tape voicing.
+// shape at every level. A strength-dependent head bump (+4.5 dB @ 90 Hz)
+// and top-end loss (down to 6 kHz) complete the tape voicing. Drive is
+// relative to the music's own ~1 s RMS, so it works at any level.
 //
 // Strength 0…1 scales drive, loop width and voicing together.
 final class TapeHysteresis {
@@ -28,6 +29,11 @@ final class TapeHysteresis {
     private var play = [[Double]](repeating: [0, 0, 0], count: 2)
     private var env = [0.0, 0.0]
     private var lp = [0.0, 0.0]
+    // Slow (~1 s) RMS: the drive is applied relative to the music's own
+    // level, so tape saturates the same at any volume (EMP runs ~−25 dBFS
+    // inside, where an absolute curve barely did anything).
+    private var rms = [1e-4, 1e-4]
+    private let rmsC = 1 - exp(-1 / (1.0 * 44100))
     private var hpS = [[Double]](repeating: [0, 0, 0, 0], count: 2)
     private let headBump = PeakingBiquad()
     private let envAtk = 1 - exp(-1 / (0.010 * 44100)), envRel = 1 - exp(-1 / (0.200 * 44100))
@@ -41,33 +47,35 @@ final class TapeHysteresis {
     func setStrength(_ s: Double) {
         let v = max(0, min(1, s))
         lock.lock(); target = v; lock.unlock()
-        headBump.setParameters(gainDb: 2.5 * v)
+        headBump.setParameters(gainDb: 4.5 * v)
     }
 
     func process(_ buf: UnsafeMutablePointer<Float>, count: Int, channel ch: Int) {
         lock.lock(); let t = target; lock.unlock()
         if t == 0 && strength < 1e-5 { strength = 0; return }
         let glide = 1 - exp(-1 / (0.05 * Self.sr))
-        var p = play[ch], e = env[ch], l = lp[ch], st = hpS[ch]
-        let lpCoef = 1 - exp(-2 * Double.pi * (20000 - 11000 * strength) / Self.sr)
+        var p = play[ch], e = env[ch], l = lp[ch], st = hpS[ch], ms = rms[ch]
+        let lpCoef = 1 - exp(-2 * Double.pi * (20000 - 14000 * strength) / Self.sr)
         for i in 0..<count {
             if ch == 0 { strength += (t - strength) * glide }
             let s = strength
-            let g = 1 + 2 * s
+            let g = 1 + 6 * s
             let x = Double(buf[i])
-            let v = x * g
+            ms += rmsC * (x * x - ms)
+            let norm = min(40, max(0.5, 0.3 / ms.squareRoot()))
+            let v = x * norm * g
             let a = abs(v)
             e += (a > e ? envAtk : envRel) * (a - e)
             var m = Self.w0 * v
             var shrink = 0.0
             for k in 0..<3 {
-                let r = s * Self.widths[k] * e
+                let r = 1.6 * s * Self.widths[k] * e
                 if v > p[k] + r { p[k] = v - r } else if v < p[k] - r { p[k] = v + r }
                 m += Self.wi * p[k]
-                shrink += Self.wi * s * Self.widths[k]
+                shrink += Self.wi * 1.6 * s * Self.widths[k]
             }
             m /= max(0.2, 1 - shrink)                        // keep small-signal gain ≈ g
-            var y = tanh(m) / g                              // saturate, return to unity-ish gain
+            var y = tanh(m) / (g * norm)                     // saturate, return to unity-ish gain
             // DC guard (play operators can park an offset).
             let o = hp.b0 * y + hp.b1 * st[0] + hp.b2 * st[1] - hp.a1 * st[2] - hp.a2 * st[3]
             st[1] = st[0]; st[0] = y; st[3] = st[2]; st[2] = o
@@ -78,7 +86,7 @@ final class TapeHysteresis {
             // Blend so strength 0 is exactly dry.
             buf[i] = Float(x + (l - x) * min(1, s * 4))
         }
-        play[ch] = p; env[ch] = e; lp[ch] = l; hpS[ch] = st
+        play[ch] = p; env[ch] = e; lp[ch] = l; hpS[ch] = st; rms[ch] = ms
         headBump.process(buf, count: count, channel: ch)
     }
 }
@@ -90,25 +98,27 @@ final class TapeHysteresis {
 // everything recovers as the music relaxes. Driven by a slow RMS envelope,
 // so it breathes with the song rather than reacting to single transients.
 //
-// Strength 0…1 scales all three: up to −6 dB of dip, cutoff down to 6 kHz,
-// and up to 4 ms of extra (smoothed) delay → a small, slow pitch droop.
+// Strength 0…1 scales all three: up to −14 dB of dip, cutoff down to 2 kHz,
+// and up to 41 ms of extra (smoothed) delay → a slow pitch droop. Loudness
+// is judged against the song's own 4 s average, with a constant base strain.
 final class TapeSag {
     private static let sr = 44100.0
-    private static let bufSize = 1024
+    private static let bufSize = 2048
     private static let baseDelay = 88.0                 // 2 ms, constant latency
-    private static let maxExtraDelay = 176.0            // +4 ms at full sag
+    private static let maxExtraDelay = 1800.0           // +41 ms at full sag
 
     private let lock = NSLock()
     private var target = 0.0
     private var strength = 0.0
-    private var power = 0.0
+    private var power = 0.0, longPower = 1e-6
+    private let longC = 1 - exp(-1 / (4.0 * 44100))
     private var delaySmooth = 0.0
     private var lp: [Float] = [0, 0]
     private let bufL = UnsafeMutablePointer<Float>.allocate(capacity: TapeSag.bufSize)
     private let bufR = UnsafeMutablePointer<Float>.allocate(capacity: TapeSag.bufSize)
     private var w = 0
     private let atk = 1 - exp(-1 / (0.030 * 44100)), rel = 1 - exp(-1 / (0.400 * 44100))
-    private let delayGlide = 1 - exp(-1 / (0.150 * 44100))
+    private let delayGlide = 1 - exp(-1 / (0.180 * 44100))
 
     init() {
         bufL.initialize(repeating: 0, count: Self.bufSize)
@@ -139,16 +149,19 @@ final class TapeSag {
 
             let p = Double(max(l * l, r * r))
             power += (p > power ? atk : rel) * (p - power)
-            let level = power.squareRoot()
-            let over = max(0, min(1, (level - 0.1) / 0.9))        // above ~−20 dBFS
-            let sag = strength * over
+            longPower += longC * (p - longPower)
+            // Louder than the song's own recent average → the machine strains
+            // (relative, so it works at any level; it used to need > −20 dBFS).
+            let rel = (power / max(longPower, 1e-12)).squareRoot()
+            let over = max(0, min(1, (rel - 0.5) / 0.6))
+            let sag = strength * (0.5 + 0.5 * over)
 
             delaySmooth += (Self.maxExtraDelay * sag - delaySmooth) * delayGlide
             let d = Self.baseDelay + delaySmooth
             var yl = read(bufL, d), yr = read(bufR, d)
 
-            let gain = Float(1 - 0.5 * sag)                       // up to −6 dB
-            let fc = 18000 - 12000 * sag
+            let gain = Float(1 - 0.8 * sag)                       // up to −14 dB
+            let fc = 18000 - 16000 * sag
             let a = Float(1 - exp(-2 * Double.pi * fc / Self.sr))
             lp[0] += a * (yl - lp[0]); lp[1] += a * (yr - lp[1])
             if strength > 1e-5 { yl = lp[0] * gain; yr = lp[1] * gain }
@@ -164,15 +177,15 @@ final class TapeSag {
 // deviation = −d(delay)/dt):
 //   • wow: slow drift from an uneven reel. A sine whose rate wanders
 //     0.4–1.6 Hz, plus a once-per-rotation bump (a sharper pulse at the
-//     same rate), up to ±0.5 % speed (≈ ±9 cents) at full strength.
-//   • flutter: capstan/roller ripple, 6–14 Hz wandering, up to ±0.12 %.
+//     same rate), up to ±3 % speed (≈ ±50 cents) at full strength.
+//   • flutter: capstan/roller ripple, 6–14 Hz wandering, up to ±0.8 %.
 // Both channels share the transport (same modulation), as on real tape.
-// A fixed 2 ms centre delay is always present, so latency stays constant and
-// strength 0 is a pure 2 ms delay. Realtime-safe.
+// A fixed 14 ms centre delay is always present, so latency stays constant and
+// strength 0 is a pure 14 ms delay. Realtime-safe.
 final class TapeWowFlutter {
     private static let sr = 44100.0
-    static let latency = 88                                       // 2 ms centre
-    private static let size = 1024
+    static let latency = 620                                      // 14 ms centre (room for deep wow)
+    private static let size = 2048
 
     private let lock = NSLock()
     private var target = 0.0, strength = 0.0
@@ -207,8 +220,8 @@ final class TapeWowFlutter {
         let rg = 1 - exp(-Double(count) / (1.5 * sr))
         wowRate += (wowRateT - wowRate) * rg; flRate += (flRateT - flRate) * rg
         // Delay amplitude for a given peak speed deviation: A = dev / (2π f).
-        let wowA = 0.005 * strength / (2 * .pi * wowRate) * sr
-        let flA = 0.0012 * strength / (2 * .pi * flRate) * sr
+        let wowA = 0.03 * strength / (2 * .pi * wowRate) * sr
+        let flA = 0.008 * strength / (2 * .pi * flRate) * sr
         let wInc = wowRate / sr, fInc = flRate / sr
         let centre = Double(Self.latency)
         let L = buf[0], R = buf[1]
@@ -234,7 +247,7 @@ final class TapeWowFlutter {
 
 // Tape saturates high frequencies first: during loud, bright passages the
 // recording bias partly erases the treble it is laying down, so the top end
-// squashes while the mids stay put. Model: split at ~3.5 kHz (complementary
+// squashes while the mids stay put. Model: split at ~2.5 kHz (complementary
 // one-pole pair, so the bands sum back exactly), follow the treble band's
 // envelope (1 ms attack / 120 ms release), and compress and softly saturate
 // only that band. Strength sets how hard: up to ~−12 dB of treble on loud
@@ -243,8 +256,9 @@ final class TapeSelfErasure {
     private static let sr = 44100.0
     private let lock = NSLock()
     private var target = 0.0, strength = 0.0
-    private var lp = [0.0, 0.0], env = [0.0, 0.0]
-    private let split = 1 - exp(-2 * Double.pi * 3500 / 44100)
+    private var lp = [0.0, 0.0], env = [0.0, 0.0], rms = [1e-4, 1e-4]
+    private let rmsC = 1 - exp(-1 / (1.0 * 44100))
+    private let split = 1 - exp(-2 * Double.pi * 2500 / 44100)
     private let atk = 1 - exp(-1 / (0.001 * 44100)), rel = 1 - exp(-1 / (0.120 * 44100))
 
     func setStrength(_ s: Double) { lock.lock(); target = max(0, min(1, s)); lock.unlock() }
@@ -252,23 +266,27 @@ final class TapeSelfErasure {
     func process(_ buf: UnsafeMutablePointer<Float>, count: Int, channel ch: Int) {
         lock.lock(); let t = target; lock.unlock()
         if ch == 0 { strength += (t - strength) * (1 - exp(-Double(count) / (0.05 * Self.sr))) }
-        var l = lp[ch], e = env[ch]
+        var l = lp[ch], e = env[ch], ms = rms[ch]
         if t == 0 && strength < 1e-5 {
             for i in 0..<count { l += split * (Double(buf[i]) - l) }   // keep the split warm
             lp[ch] = l; env[ch] = 0; return
         }
-        let k = 30 * strength * strength + 6 * strength         // compression depth
-        let drive = 1 + 3 * strength
+        let k = 40 * strength * strength + 10 * strength        // compression depth
+        let drive = 1 + 5 * strength
         for i in 0..<count {
             let x = Double(buf[i])
+            ms += rmsC * (x * x - ms)
+            // Treble envelope relative to the music's ~1 s level (it used to
+            // be absolute, and at EMP's internal level it barely engaged).
+            let norm = min(40, max(0.5, 0.3 / ms.squareRoot()))
             l += split * (x - l)
             let h = x - l
-            let a = abs(h)
+            let a = abs(h) * norm
             e += (a > e ? atk : rel) * (a - e)
             let g = 1 / (1 + k * e)
-            let hc = tanh(h * g * drive) / drive                    // soft ceiling on the treble
+            let hc = tanh(h * norm * g * drive) / (drive * norm)    // soft ceiling on the treble
             buf[i] = Float(l + hc)
         }
-        lp[ch] = l; env[ch] = e
+        lp[ch] = l; env[ch] = e; rms[ch] = ms
     }
 }

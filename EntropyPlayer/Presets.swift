@@ -46,6 +46,9 @@ struct GlobalPreset {
     static let postTubeKey = "posttube"
 
     static let initName = "INIT"
+    /// "None": every Effects-section knob (and the Tube) to 0; macro, recipe and style untouched.
+    static let noneName = "None"
+    static let effectKeys = ["eq", "sat", "oddsat", "rolloff", "shimmer", "depth", "reverb", "gd", "murk", "blur"]
 
     static let initPreset = GlobalPreset(name: initName, vibe: nil, macro: 0, recipe: "Classic", style: "Dark Room", sensitivity:
         s(eq: 24, sat: 35.5, odd: 11, roll: 43, gd: 25, blur: 50, rev: 15, shim: 50))
@@ -153,7 +156,7 @@ struct GlobalPreset {
 struct EmulationPreset {
     typealias Vibe = GlobalPreset.Vibe
     let name: String
-    let vibe: Vibe?          // nil only for Off
+    let vibe: Vibe?          // nil only for None
     let sensitivity: [String: Double]
 
     static let keys = ["voices", "detune", "cdelay", "cvib", "hyst", "sag", "wow", "erase",
@@ -168,7 +171,7 @@ struct EmulationPreset {
          "fuzz": fuzz, "bloom": bloom, "fur": fur, "wobble": wobble]
     }
 
-    static let offName = "Off"
+    static let offName = "None"
     static let off = EmulationPreset(name: offName, vibe: nil, sensitivity: s(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 
     static let all: [EmulationPreset] = [
@@ -226,7 +229,7 @@ struct TexturePreset {
          "bits": bits, "softclip": clip, "gnoise": dust, "rattle": rattle, "corpus": corpus, "grain": echo]
     }
 
-    static let offName = "Off"
+    static let offName = "None"
     static let off = TexturePreset(name: offName, vibe: nil, sensitivity: s(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 
     static let all: [TexturePreset] = [
@@ -273,6 +276,8 @@ struct SuitePreset {
     let fx: String, emulation: String, texture: String
 
     static let noneName = "None"
+    /// Shown when the FX / Emulation / Texture presets no longer match one suite.
+    static let customName = "Custom"
 
     static let all: [SuitePreset] = [
         // ── Nostalgic ──

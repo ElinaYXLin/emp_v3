@@ -35,6 +35,8 @@ final class TubeAmp {
 
     private let lock = NSLock()
     private var tFuzz = 0.0, tBloom = 0.0, tFur = 0.0
+    private var msLevel = 1e-4
+    private static let msC = 1 - exp(-1 / (1.0 * 44100))
     private var fuzz = 0.0, bloom = 0.0, fur = 0.0
 
     private struct Chan { var flux = 0.0, fluxEnv = 0.0, cab1 = 0.0, cab2 = 0.0, lowA = 0.0, lowB = 0.0, crackle = 0.0 }
@@ -61,7 +63,7 @@ final class TubeAmp {
         let g = 1 - exp(-Double(count) / (0.05 * sr))
         fuzz += (tf - fuzz) * g; bloom += (tb - bloom) * g; fur += (tu - fur) * g
 
-        let drive = 14.0 * pow(fuzz, 1.2)                          // core drive
+        let drive = 22.0 * pow(fuzz, 1.1)                          // core drive (on level-normalized input)
         let cabHz = 4500 - 1500 * fuzz
         let cab = 1 - exp(-2 * Double.pi * cabHz / sr)
         let lowC = 1 - exp(-2 * Double.pi * 150 / sr)
@@ -69,9 +71,10 @@ final class TubeAmp {
         let biasAtk = 1 - exp(-1 / (0.030 * sr)), biasRel = 1 - exp(-1 / (0.600 * sr))
         let dipAtk = 1 - exp(-1 / (0.008 * sr))
         let dipRel = 1 - exp(-1 / ((0.100 + 0.200 * bloom) * sr))
-        let depth = 24 * bloom * (0.5 + 0.5 * bloom)
-        let crackRate = (2 + 60 * fur * fur) / sr                // events/sample at full decay
-        let crackLevel = 0.25 + 1.0 * fur
+        let depth = 40 * bloom * (0.5 + 0.5 * bloom)               // on the normalized bass envelope
+        // Rarer and softer (it popped ~1×/s at 20 %): ~0.2/s at 20 %, ~8/s at full.
+        let crackRate = (0.1 + 8 * fur * fur) / sr                 // events/sample at full decay
+        let crackLevel = 0.1 + 0.6 * fur
         let crackDecay = exp(-1 / (0.0012 * sr))
         let biasShift = 1.2 * fur
         let fluxAtk = 1 - exp(-1 / (0.002 * sr)), fluxRel = 1 - exp(-1 / (0.150 * sr))
@@ -80,9 +83,13 @@ final class TubeAmp {
         for i in 0..<count {
             // Stereo-linked bass detector.
             let xl = Double(left[i]), xr = right.map { Double($0[i]) } ?? xl
+            // Music's own ~1 s level: fuzz and bloom act relative to it, so
+            // they engage at EMP's quiet internal level (≈ −25 dBFS) too.
+            msLevel += Self.msC * (0.5 * (xl * xl + xr * xr) - msLevel)
+            let norm = min(40, max(0.5, 0.3 / msLevel.squareRoot()))
             a.lowA += lowC * (xl - a.lowA); a.lowB += lowC * (a.lowA - a.lowB)
             b.lowA += lowC * (xr - b.lowA); b.lowB += lowC * (b.lowA - b.lowB)
-            let bassPeak = max(abs(a.lowB), abs(b.lowB))
+            let bassPeak = max(abs(a.lowB), abs(b.lowB)) * norm
             bassEnv += (bassPeak > bassEnv ? envAtk : envRel) * (bassPeak - bassEnv)
             biasEnv += (bassEnv > biasEnv ? biasAtk : biasRel) * (bassEnv - biasEnv)
 
@@ -98,7 +105,7 @@ final class TubeAmp {
             func run(_ c: inout Chan, _ x: Double) -> Double {
                 // Transformer fuzz.
                 let prev = c.flux
-                c.flux = leak * c.flux + k * x
+                c.flux = leak * c.flux + k * x * norm
                 var products = 0.0
                 // Saturation depth cap: on very loud sub-bass the core would
                 // saturate so deeply it only conducts in brief bursts near
@@ -116,7 +123,7 @@ final class TubeAmp {
                     let m = 0.2, off = tanh(dEff * bias)
                     let sat  = (1 - m) * (tanh(dEff * (c.flux + bias)) - off) / dEff + m * c.flux
                     let satP = (1 - m) * (tanh(dEff * (prev + bias)) - off) / dEff + m * prev
-                    products = (sat - leak * satP) / k - x                // exact inverse of the integrator
+                    products = ((sat - leak * satP) / k - x * norm) / norm   // exact inverse of the integrator
                 }
                 // Bias-shift crackle.
                 if fur > 1e-4 && decay > 0.05 {
@@ -124,7 +131,8 @@ final class TubeAmp {
                     let u = Double(rg >> 11) / Double(1 << 53)
                     if u < crackRate * decay {
                         let v = u / (crackRate * decay)                     // reuse as a fresh uniform
-                        c.crackle += (v < 0.5 ? -1 : 1) * crackLevel * biasEnv * (0.4 + 1.2 * abs(v - 0.5))
+                        // biasEnv is level-normalized now; ÷norm keeps the pop at signal scale.
+                        c.crackle += (v < 0.5 ? -1 : 1) * crackLevel * biasEnv / norm * (0.4 + 1.2 * abs(v - 0.5))
                     }
                 }
                 products += c.crackle

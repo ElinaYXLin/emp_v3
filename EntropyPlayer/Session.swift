@@ -64,8 +64,10 @@ extension AppState {
         sensitivity = AppSettings.defaultSensitivities.merging(s.sensitivity) { _, new in new }
         ranges      = AppSettings().ranges.merging(s.ranges) { _, new in new }
         satRecipe   = s.satRecipe
-        selectedPreset = s.selectedPreset; selectedEmuPreset = s.selectedEmuPreset
-        selectedTexPreset = s.selectedTexPreset ?? TexturePreset.offName; selectedSuite = s.selectedSuite ?? SuitePreset.noneName
+        // "Off" was renamed "None".
+        func renamed(_ n: String) -> String { n == "Off" ? "None" : n }
+        selectedPreset = s.selectedPreset; selectedEmuPreset = renamed(s.selectedEmuPreset)
+        selectedTexPreset = renamed(s.selectedTexPreset ?? TexturePreset.offName); selectedSuite = s.selectedSuite ?? SuitePreset.noneName
         waveColor   = Color(hex: s.waveColor)
         dynamicsMode = s.dynamics == "compressor" ? .compressor : .limiter
         audio.setDynamics(mode: dynamicsMode)
