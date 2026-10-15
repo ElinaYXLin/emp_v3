@@ -174,35 +174,38 @@ struct EmulationPreset {
     static let offName = "None"
     static let off = EmulationPreset(name: offName, vibe: nil, sensitivity: s(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 
+    // Tape (hyst sag wow erase) and Tube (fuzz bloom) values were scaled down
+    // (×0.45 / 0.35 / 0.25 / 0.6, ×0.5 / 0.5) when those effects were made much
+    // stronger, so each preset lands a little stronger than it originally sounded.
     static let all: [EmulationPreset] = [
         off,
         // Every preset layers at least two of Choir, Tape and Tube Amp.
         //                                                        choir v  det dly vib   tape hys sag wow ers   tube fz blm fur wob
         // ── Nostalgic ──
-        .init(name: "Church Choir on a Worn Cassette", vibe: .nostalgic, sensitivity: s(45, 30, 40, 25,  45, 30, 50, 35,   0, 10,  5, 15)),
-        .init(name: "Garage Band Demo Tape",           vibe: .nostalgic, sensitivity: s(15, 25, 20, 10,  55, 40, 30, 30,  40, 30, 15, 20)),
-        .init(name: "Wedding Video, 1994",             vibe: .nostalgic, sensitivity: s(30, 20, 30, 20,  35, 25, 45, 30,  10, 20,  0, 15)),
-        .init(name: "Jukebox in a Smoky Bar",          vibe: .nostalgic, sensitivity: s(10, 15, 15,  5,  40, 30, 25, 25,  30, 35, 35, 25)),
+        .init(name: "Church Choir on a Worn Cassette", vibe: .nostalgic, sensitivity: s(45, 30, 40, 25,  20, 10, 12, 21,   0,  5,  5, 15)),
+        .init(name: "Garage Band Demo Tape",           vibe: .nostalgic, sensitivity: s(15, 25, 20, 10,  25, 14,  8, 18,  20, 15, 15, 20)),
+        .init(name: "Wedding Video, 1994",             vibe: .nostalgic, sensitivity: s(30, 20, 30, 20,  16,  9, 11, 18,   5, 10,  0, 15)),
+        .init(name: "Jukebox in a Smoky Bar",          vibe: .nostalgic, sensitivity: s(10, 15, 15,  5,  18, 10,  6, 15,  15, 18, 35, 25)),
         // ── Calming ──
-        .init(name: "Lullaby on a Valve Radio",        vibe: .calming,   sensitivity: s(35, 15, 40, 10,  25, 10, 20, 25,  10, 35,  0, 15)),
-        .init(name: "Monks by the Fireplace",          vibe: .calming,   sensitivity: s(55, 20, 60, 10,  20,  5, 10, 15,  15, 40, 10, 10)),
-        .init(name: "Slow Tide Reel",                  vibe: .calming,   sensitivity: s(40, 25, 55, 15,  30, 15, 35, 20,   0, 25,  0, 20)),
-        .init(name: "Velvet Living Room Choir",        vibe: .calming,   sensitivity: s(30, 15, 35, 10,  25, 10, 10, 25,  20, 40,  0, 15)),
+        .init(name: "Lullaby on a Valve Radio",        vibe: .calming,   sensitivity: s(35, 15, 40, 10,  11,  4,  5, 15,   5, 18,  0, 15)),
+        .init(name: "Monks by the Fireplace",          vibe: .calming,   sensitivity: s(55, 20, 60, 10,   9,  2,  2,  9,   8, 20, 10, 10)),
+        .init(name: "Slow Tide Reel",                  vibe: .calming,   sensitivity: s(40, 25, 55, 15,  14,  5,  9, 12,   0, 12,  0, 20)),
+        .init(name: "Velvet Living Room Choir",        vibe: .calming,   sensitivity: s(30, 15, 35, 10,  11,  4,  2, 15,  10, 20,  0, 15)),
         // ── Inspiring ──
-        .init(name: "Cathedral Choir to Tape",         vibe: .inspiring, sensitivity: s(85, 35, 60, 25,  35, 10,  5, 10,   0, 15,  0,  0)),
-        .init(name: "Gospel Hall Through a Valve Amp", vibe: .inspiring, sensitivity: s(70, 45, 35, 45,  15,  0,  0,  5,  25, 35,  5, 10)),
-        .init(name: "Stadium Anthem Master",           vibe: .inspiring, sensitivity: s(100, 25, 25, 20, 40, 15, 10, 15,  20, 30,  0,  0)),
-        .init(name: "Studio Two, Full Band",           vibe: .inspiring, sensitivity: s(25, 20, 20, 15,  45, 15, 10, 15,  15, 25,  0,  5)),
+        .init(name: "Cathedral Choir to Tape",         vibe: .inspiring, sensitivity: s(85, 35, 60, 25,  16,  4,  1,  6,   0,  8,  0,  0)),
+        .init(name: "Gospel Hall Through a Valve Amp", vibe: .inspiring, sensitivity: s(70, 45, 35, 45,   7,  0,  0,  3,  12, 18,  5, 10)),
+        .init(name: "Stadium Anthem Master",           vibe: .inspiring, sensitivity: s(100, 25, 25, 20,  18,  5,  2,  9,  10, 15,  0,  0)),
+        .init(name: "Studio Two, Full Band",           vibe: .inspiring, sensitivity: s(25, 20, 20, 15,  20,  5,  2,  9,   8, 12,  0,  5)),
         // ── Dreamy ──
-        .init(name: "Choir Lost in a Melting Reel",    vibe: .dreamy,    sensitivity: s(75, 60, 80, 30,  30, 35, 75, 20,   0, 15,  0, 30)),
-        .init(name: "Ghosts in the Amp",               vibe: .dreamy,    sensitivity: s(50, 70, 70, 55,  10,  0, 40, 10,  35, 30, 15, 45)),
-        .init(name: "Underwater Valve Choir",          vibe: .dreamy,    sensitivity: s(45, 40, 60, 25,  20, 20, 40, 35,  45, 45, 10, 60)),
-        .init(name: "Sleepwalking Tape Ensemble",      vibe: .dreamy,    sensitivity: s(60, 50, 65, 35,  35, 30, 60, 30,  10, 20,  5, 35)),
+        .init(name: "Choir Lost in a Melting Reel",    vibe: .dreamy,    sensitivity: s(75, 60, 80, 30,  14, 12, 19, 12,   0,  8,  0, 30)),
+        .init(name: "Ghosts in the Amp",               vibe: .dreamy,    sensitivity: s(50, 70, 70, 55,   4,  0, 10,  6,  18, 15, 15, 45)),
+        .init(name: "Underwater Valve Choir",          vibe: .dreamy,    sensitivity: s(45, 40, 60, 25,   9,  7, 10, 21,  22, 22, 10, 60)),
+        .init(name: "Sleepwalking Tape Ensemble",      vibe: .dreamy,    sensitivity: s(60, 50, 65, 35,  16, 10, 15, 18,   5, 10,  5, 35)),
         // ── Playful ──
-        .init(name: "Barbershop on a Wobbly Deck",     vibe: .playful,   sensitivity: s(30, 40, 20, 70,  25, 20, 55, 10,  10,  0,  0, 20)),
-        .init(name: "Fuzz Bass Karaoke",               vibe: .playful,   sensitivity: s(40, 50, 25, 40,  20, 10,  0,  0,  70, 40, 25, 10)),
-        .init(name: "Kazoo Choir Meets Fuzz Pedal",    vibe: .playful,   sensitivity: s(60, 85, 30, 90,   0,  0, 30, 10,  50, 20, 20,  0)),
-        .init(name: "Crackle, Pop & Sing-Along",       vibe: .playful,   sensitivity: s(35, 30, 30, 30,  30, 25, 30, 20,  45, 30, 70, 30)),
+        .init(name: "Barbershop on a Wobbly Deck",     vibe: .playful,   sensitivity: s(30, 40, 20, 70,  11,  7, 14,  6,   5,  0,  0, 20)),
+        .init(name: "Fuzz Bass Karaoke",               vibe: .playful,   sensitivity: s(40, 50, 25, 40,   9,  4,  0,  0,  35, 20, 25, 10)),
+        .init(name: "Kazoo Choir Meets Fuzz Pedal",    vibe: .playful,   sensitivity: s(60, 85, 30, 90,   0,  0,  8,  6,  25, 10, 20,  0)),
+        .init(name: "Crackle, Pop & Sing-Along",       vibe: .playful,   sensitivity: s(35, 30, 30, 30,  14,  9,  8, 12,  22, 15, 70, 30)),
     ]
 
     static func presets(in vibe: Vibe) -> [EmulationPreset] { all.filter { $0.vibe == vibe } }
