@@ -358,7 +358,10 @@ final class MurkFilter: BlurSTFT {
                     t = max(t, p[j] * powf(10, -db / 10))
                 }
             }
-            var gain = t > 0 ? (p[k] / (p[k] + s * 10 * t)).squareRoot() : 1
+            // Guard 0/0: a silent bin with an underflowed mask gave NaN, which
+            // then lived on in the glided gains / fog and broke the output.
+            let den = p[k] + s * 10 * t
+            var gain = t > 0 && den > 1e-30 ? (p[k] / den).squareRoot() : 1
             gain *= powf(10, (duckDb * weightDuck[k] + bloomDb * weightBloom[k] - 4 * s * weightDark[k]) / 20)
             g[k] += (gain < g[k] ? gDown : gUp) * (gain - g[k])
             re[k] *= g[k]; im[k] *= g[k]

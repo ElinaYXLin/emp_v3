@@ -55,91 +55,95 @@ struct GlobalPreset {
 
     static let all: [GlobalPreset] = [
         initPreset,
+        // 20 most different of the original 40 kept (farthest-point selection on
+        // knob values + recipe + reverb style), plus 20 newer presets spread across
+        // more of the Effects knobs. All tested at macro 50 % for resonance,
+        // ringing, clicks, harshness, pumping, stereo balance and tonal sanity.
         // ── Nostalgic ──
-        .init(name: "Grandpa's Favorite Record", vibe: .nostalgic, macro: 60, recipe: "Old Photograph", style: "Dark Room", sensitivity:
-            s(eq: 18, sat: 33, odd: 9, roll: 70, gd: 15, blur: 25, rev: 20, shim: 15, depth: 14, tube: 0, murk: 25)),
-        .init(name: "Walkman on the School Bus", vibe: .nostalgic, macro: 60, recipe: "Vintagize", style: "Dark Room", sensitivity:
-            s(eq: 0, sat: 24, odd: 15, roll: 60, gd: 10, blur: 10, rev: 5, shim: 0, depth: 10, tube: 15, murk: 15)),
         .init(name: "Cassette From an Old Friend", vibe: .nostalgic, macro: 60, recipe: "Faded Polaroid", style: "Dark Room", sensitivity:
             s(eq: 6, sat: 30, odd: 12, roll: 55, gd: 15, blur: 20, rev: 15, shim: 10, depth: 13, tube: 15, murk: 20)),
         .init(name: "Midnight Diner Jukebox", vibe: .nostalgic, macro: 60, recipe: "Late Night Diner", style: "Hall", sensitivity:
             s(eq: 15, sat: 40, odd: 40, roll: 50, gd: 15, blur: 15, rev: 30, shim: 10, depth: 13, tube: 20, murk: 20)),
-        .init(name: "Mom's Car Radio, 1996", vibe: .nostalgic, macro: 60, recipe: "Summer '99", style: "Dark Room", sensitivity:
-            s(eq: 6, sat: 21, odd: 21, roll: 60, gd: 10, blur: 10, rev: 10, shim: 0, depth: 10, tube: 25, murk: 15)),
         .init(name: "Snow Day at Grandma's", vibe: .nostalgic, macro: 60, recipe: "Grandma's Kitchen", style: "Cathedral", sensitivity:
             s(eq: 21, sat: 36, odd: 6, roll: 60, gd: 20, blur: 30, rev: 35, shim: 30, depth: 19, tube: 0, murk: 20)),
         .init(name: "Old Photograph in a Shoebox", vibe: .nostalgic, macro: 60, recipe: "Old Photograph", style: "Memory Fog", sensitivity:
             s(eq: 6, sat: 30, odd: 12, roll: 75, gd: 30, blur: 50, rev: 25, shim: 20, depth: 16, tube: 0, murk: 30)),
-        .init(name: "VHS Tape of a Birthday Party", vibe: .nostalgic, macro: 60, recipe: "Faded Polaroid", style: "Dark Room", sensitivity:
-            s(eq: 0, sat: 27, odd: 18, roll: 70, gd: 15, blur: 25, rev: 15, shim: 5, depth: 12, tube: 15, murk: 20)),
-        .init(name: "Arcade at the Mall, 1989", vibe: .nostalgic, macro: 60, recipe: "Crunch", style: "Tunnel", sensitivity:
-            s(eq: 10, sat: 40, odd: 40, roll: 45, gd: 10, blur: 10, rev: 30, shim: 5, depth: 12, tube: 30, murk: 10)),
-        .init(name: "Sleepover Mixtape", vibe: .nostalgic, macro: 60, recipe: "Vintagize", style: "Dark Room", sensitivity:
-            s(eq: 9, sat: 27, odd: 12, roll: 60, gd: 15, blur: 20, rev: 20, shim: 10, depth: 13, tube: 15, murk: 15)),
-        .init(name: "Grandma's Kitchen Radio", vibe: .nostalgic, macro: 60, recipe: "Grandma's Kitchen", style: "Dark Room", sensitivity:
-            s(eq: 18, sat: 30, odd: 12, roll: 70, gd: 15, blur: 20, rev: 20, shim: 10, depth: 13, tube: 0, murk: 20)),
+        .init(name: "Living Room Hi-Fi, 1978", vibe: .nostalgic, macro: 60, recipe: "Warmth", style: "Dark Room", sensitivity:
+            s(eq: 35, sat: 45, odd: 5, roll: 30, gd: 0, blur: 0, rev: 20, shim: 0, depth: 20, tube: 25, murk: 25)),
+        .init(name: "Birthday Party on VHS", vibe: .nostalgic, macro: 60, recipe: "Faded Polaroid", style: "Dark Room", sensitivity:
+            s(eq: 5, sat: 20, odd: 25, roll: 45, gd: 35, blur: 30, rev: 15, shim: 0, depth: 0, tube: 20, murk: 10)),
+        .init(name: "Grandpa's Turntable", vibe: .nostalgic, macro: 60, recipe: "Old Photograph", style: "Dark Room", sensitivity:
+            s(eq: 25, sat: 40, odd: 10, roll: 50, gd: 10, blur: 10, rev: 25, shim: 0, depth: 30, tube: 10, murk: 35)),
+        .init(name: "Mom's Car Stereo, Summer 1996", vibe: .nostalgic, macro: 60, recipe: "Summer '99", style: "Dark Room", sensitivity:
+            s(eq: 15, sat: 25, odd: 30, roll: 35, gd: 0, blur: 0, rev: 10, shim: 10, depth: 15, tube: 35, murk: 40)),
         // ── Calming ──
-        .init(name: "Rainy Window, Sunday Afternoon", vibe: .calming, macro: 55, recipe: "Rainy Sunday", style: "Memory Fog", sensitivity:
-            s(eq: 10.5, sat: 31.5, odd: 3.5, roll: 65, gd: 25, blur: 40, rev: 35, shim: 35, depth: 36, tube: 7, murk: 30)),
         .init(name: "Campfire Under the Stars", vibe: .calming, macro: 55, recipe: "Campfire Crackle", style: "Hall", sensitivity:
             s(eq: 9, sat: 30, odd: 15, roll: 55, gd: 20, blur: 30, rev: 40, shim: 40, depth: 37, tube: 12, murk: 25)),
-        .init(name: "Lullaby From the Next Room", vibe: .calming, macro: 60, recipe: "Lullaby", style: "Memory Fog", sensitivity:
-            s(eq: 25, sat: 30, odd: 0, roll: 85, gd: 50, blur: 55, rev: 45, shim: 45, depth: 38, tube: 12, murk: 35)),
-        .init(name: "Honey Tea by the Fireplace", vibe: .calming, macro: 55, recipe: "Honey & Smoke", style: "Dark Room", sensitivity:
-            s(eq: 21, sat: 36, odd: 6, roll: 55, gd: 20, blur: 25, rev: 25, shim: 35, depth: 36, tube: 0, murk: 30)),
-        .init(name: "Falling Asleep to the Radio", vibe: .calming, macro: 65, recipe: "Lullaby", style: "Memory Fog", sensitivity:
-            s(eq: 25, sat: 35, odd: 10, roll: 80, gd: 45, blur: 65, rev: 45, shim: 50, depth: 40, tube: 12, murk: 35)),
-        .init(name: "Ocean Hush at Dusk", vibe: .calming, macro: 60, recipe: "Velvet", style: "Cathedral", sensitivity:
-            s(eq: 20, sat: 25, odd: 0, roll: 70, gd: 40, blur: 55, rev: 45, shim: 40, depth: 37, tube: 12, murk: 30)),
-        .init(name: "Tea Kettle Morning", vibe: .calming, macro: 55, recipe: "Warmth", style: "Dark Room", sensitivity:
-            s(eq: 18, sat: 27, odd: 4.5, roll: 55, gd: 15, blur: 25, rev: 30, shim: 20, depth: 31, tube: 7, murk: 15)),
         .init(name: "Snowfall Through a Window", vibe: .calming, macro: 60, recipe: "Lullaby", style: "Cathedral", sensitivity:
-            s(eq: 15, sat: 20, odd: 0, roll: 75, gd: 30, blur: 60, rev: 50, shim: 45, depth: 38, tube: 12, murk: 25)),
+            s(eq: 15, sat: 20, odd: 0, roll: 75, gd: 25, blur: 42, rev: 50, shim: 45, depth: 38, tube: 12, murk: 25)),
         .init(name: "Forest Cabin, Rain on the Roof", vibe: .calming, macro: 55, recipe: "Rainy Sunday", style: "Dark Room", sensitivity:
             s(eq: 21, sat: 29.5, odd: 4, roll: 65, gd: 25, blur: 35, rev: 35, shim: 30, depth: 34, tube: 7, murk: 25)),
         .init(name: "Library Nap", vibe: .calming, macro: 55, recipe: "Velvet", style: "Memory Fog", sensitivity:
             s(eq: 20, sat: 25, odd: 0, roll: 80, gd: 20, blur: 45, rev: 25, shim: 25, depth: 32, tube: 12, murk: 30)),
+        .init(name: "Honey Tea by the Fireplace", vibe: .calming, macro: 55, recipe: "Honey & Smoke", style: "Dark Room", sensitivity:
+            s(eq: 30, sat: 35, odd: 0, roll: 40, gd: 0, blur: 0, rev: 30, shim: 20, depth: 45, tube: 10, murk: 30)),
+        .init(name: "Rainy Window, Sunday Afternoon", vibe: .calming, macro: 55, recipe: "Rainy Sunday", style: "Memory Fog", sensitivity:
+            s(eq: 15, sat: 20, odd: 0, roll: 55, gd: 20, blur: 25, rev: 45, shim: 25, depth: 25, tube: 0, murk: 45)),
+        .init(name: "Ocean Hush at Dusk", vibe: .calming, macro: 60, recipe: "Velvet", style: "Cathedral", sensitivity:
+            s(eq: 10, sat: 15, odd: 0, roll: 45, gd: 45, blur: 40, rev: 50, shim: 35, depth: 30, tube: 0, murk: 20)),
+        .init(name: "Weighted Blanket", vibe: .calming, macro: 60, recipe: "Lullaby", style: "Dark Room", sensitivity:
+            s(eq: 40, sat: 30, odd: 0, roll: 35, gd: 0, blur: 0, rev: 15, shim: 0, depth: 50, tube: 15, murk: 60)),
         // ── Inspiring ──
-        .init(name: "Sunrise Over the Rooftops", vibe: .inspiring, macro: 55, recipe: "Silk", style: "Hall", sensitivity:
-            s(eq: 10, sat: 30, odd: 5, roll: 15, gd: 10, blur: 15, rev: 45, shim: 35, depth: 30, tube: 15, murk: 0)),
-        .init(name: "First Day of Something New", vibe: .inspiring, macro: 55, recipe: "Sweeten", style: "Plate", sensitivity:
-            s(eq: 5, sat: 35, odd: 10, roll: 10, gd: 5, blur: 10, rev: 40, shim: 25, depth: 28, tube: 15, murk: 0)),
         .init(name: "Mountain Air After Rain", vibe: .inspiring, macro: 60, recipe: "Silk", style: "Hall", sensitivity:
             s(eq: 5, sat: 25, odd: 0, roll: 20, gd: 10, blur: 20, rev: 50, shim: 40, depth: 32, tube: 15, murk: 5)),
         .init(name: "Stadium Lights, Home Team Winning", vibe: .inspiring, macro: 60, recipe: "Punch", style: "Hall", sensitivity:
             s(eq: 12.5, sat: 38, odd: 25.5, roll: 10, gd: 5, blur: 5, rev: 50, shim: 20, depth: 26, tube: 10, murk: 5)),
         .init(name: "Open Road, Windows Down", vibe: .inspiring, macro: 60, recipe: "Summer '99", style: "Plate", sensitivity:
             s(eq: 10, sat: 40, odd: 20, roll: 20, gd: 10, blur: 10, rev: 25, shim: 15, depth: 24, tube: 15, murk: 5)),
+        .init(name: "Sunrise Over the Rooftops", vibe: .inspiring, macro: 55, recipe: "Silk", style: "Hall", sensitivity:
+            s(eq: 5, sat: 25, odd: 5, roll: 0, gd: 0, blur: 15, rev: 50, shim: 55, depth: 10, tube: 15, murk: 0)),
+        .init(name: "First Day of Something New", vibe: .inspiring, macro: 55, recipe: "Sweeten", style: "Plate", sensitivity:
+            s(eq: 0, sat: 45, odd: 15, roll: 0, gd: 10, blur: 0, rev: 40, shim: 20, depth: 0, tube: 25, murk: 0)),
         .init(name: "Graduation Morning", vibe: .inspiring, macro: 55, recipe: "Glow", style: "Hall", sensitivity:
-            s(eq: 6, sat: 21, odd: 6, roll: 15, gd: 10, blur: 15, rev: 55, shim: 45, depth: 34, tube: 5, murk: 0)),
+            s(eq: 10, sat: 30, odd: 5, roll: 10, gd: 0, blur: 25, rev: 55, shim: 40, depth: 35, tube: 10, murk: 0)),
+        .init(name: "Skyscraper Window at Noon", vibe: .inspiring, macro: 60, recipe: "Punch", style: "Plate", sensitivity:
+            s(eq: 20, sat: 50, odd: 30, roll: 0, gd: 0, blur: 0, rev: 25, shim: 0, depth: 0, tube: 40, murk: 0)),
         // ── Dreamy ──
         .init(name: "Underwater Summer Dream", vibe: .dreamy, macro: 65, recipe: "Velvet", style: "Memory Fog", sensitivity:
-            s(eq: 20, sat: 30, odd: 5, roll: 90, gd: 70, blur: 60, rev: 40, shim: 50, depth: 55, tube: 18, murk: 45)),
+            s(eq: 20, sat: 30, odd: 5, roll: 90, gd: 50, blur: 42, rev: 40, shim: 50, depth: 55, tube: 18, murk: 45)),
         .init(name: "Church Basement Choir Practice", vibe: .dreamy, macro: 60, recipe: "Glow", style: "Cathedral", sensitivity:
             s(eq: 6, sat: 18, odd: 3, roll: 50, gd: 20, blur: 30, rev: 55, shim: 70, depth: 61, tube: 3, murk: 15)),
         .init(name: "Night Drive, Headlights on the Rain", vibe: .dreamy, macro: 60, recipe: "Silk", style: "Tunnel", sensitivity:
             s(eq: 15, sat: 45, odd: 15, roll: 50, gd: 35, blur: 40, rev: 40, shim: 45, depth: 54, tube: 18, murk: 25)),
-        .init(name: "Floating in a Swimming Pool at Night", vibe: .dreamy, macro: 65, recipe: "Velvet", style: "Memory Fog", sensitivity:
-            s(eq: 20, sat: 25, odd: 5, roll: 80, gd: 60, blur: 55, rev: 45, shim: 50, depth: 55, tube: 18, murk: 40)),
         .init(name: "Half-Asleep on a Long Flight", vibe: .dreamy, macro: 60, recipe: "First Kiss", style: "Memory Fog", sensitivity:
-            s(eq: 15, sat: 30, odd: 5, roll: 75, gd: 35, blur: 60, rev: 35, shim: 45, depth: 54, tube: 8, murk: 30)),
-        .init(name: "Aurora Over an Empty Field", vibe: .dreamy, macro: 60, recipe: "Glow", style: "Cathedral", sensitivity:
-            s(eq: 6.5, sat: 16, odd: 0, roll: 50, gd: 45, blur: 55, rev: 50, shim: 65, depth: 60, tube: 8, murk: 15)),
+            s(eq: 15, sat: 30, odd: 5, roll: 75, gd: 35, blur: 42, rev: 35, shim: 45, depth: 54, tube: 8, murk: 30)),
         .init(name: "Memory of a Song You Can't Name", vibe: .dreamy, macro: 60, recipe: "Faded Polaroid", style: "Memory Fog", sensitivity:
             s(eq: 9, sat: 24, odd: 6, roll: 60, gd: 40, blur: 50, rev: 40, shim: 30, depth: 49, tube: 18, murk: 30)),
+        .init(name: "Floating in a Swimming Pool at Night", vibe: .dreamy, macro: 65, recipe: "Velvet", style: "Memory Fog", sensitivity:
+            s(eq: 15, sat: 20, odd: 0, roll: 60, gd: 55, blur: 45, rev: 40, shim: 45, depth: 45, tube: 0, murk: 55)),
+        .init(name: "Kaleidoscope Ceiling", vibe: .dreamy, macro: 60, recipe: "First Kiss", style: "Tunnel", sensitivity:
+            s(eq: 0, sat: 20, odd: 10, roll: 15, gd: 30, blur: 50, rev: 30, shim: 45, depth: 20, tube: 0, murk: 0)),
+        .init(name: "Lucid Daydream", vibe: .dreamy, macro: 60, recipe: "Glow", style: "Cathedral", sensitivity:
+            s(eq: 5, sat: 15, odd: 0, roll: 25, gd: 70, blur: 35, rev: 45, shim: 30, depth: 40, tube: 0, murk: 15)),
+        .init(name: "Moon Through Frosted Glass", vibe: .dreamy, macro: 60, recipe: "Silk", style: "Memory Fog", sensitivity:
+            s(eq: 10, sat: 10, odd: 0, roll: 70, gd: 25, blur: 55, rev: 60, shim: 50, depth: 55, tube: 0, murk: 30)),
         // ── Playful ──
-        .init(name: "Boombox in a Summer Camp", vibe: .playful, macro: 65, recipe: "Summer '99", style: "Dark Room", sensitivity:
-            s(eq: 9, sat: 30, odd: 27, roll: 30, gd: 10, blur: 10, rev: 25, shim: 0, depth: 15, tube: 20, murk: 10)),
         .init(name: "First Dance in the Gym", vibe: .playful, macro: 60, recipe: "First Kiss", style: "Hall", sensitivity:
             s(eq: 8, sat: 36, odd: 12, roll: 40, gd: 15, blur: 25, rev: 45, shim: 30, depth: 24, tube: 5, murk: 10)),
         .init(name: "Attic Radio During a Storm", vibe: .playful, macro: 60, recipe: "Crunch", style: "Dark Room", sensitivity:
             s(eq: 0, sat: 32, odd: 40, roll: 80, gd: 20, blur: 20, rev: 20, shim: 25, depth: 22, tube: 35, murk: 30)),
         .init(name: "Last Day of Summer Vacation", vibe: .playful, macro: 60, recipe: "Sweeten", style: "Plate", sensitivity:
             s(eq: 10, sat: 45, odd: 20, roll: 45, gd: 25, blur: 35, rev: 35, shim: 30, depth: 24, tube: 15, murk: 15)),
-        .init(name: "Roller Rink Saturday", vibe: .playful, macro: 60, recipe: "Summer '99", style: "Plate", sensitivity:
-            s(eq: 15, sat: 45, odd: 35, roll: 30, gd: 10, blur: 10, rev: 45, shim: 15, depth: 20, tube: 15, murk: 5)),
         .init(name: "Tin-Can Telephone", vibe: .playful, macro: 65, recipe: "Crunch", style: "Tunnel", sensitivity:
             s(eq: 0, sat: 24, odd: 36, roll: 85, gd: 5, blur: 10, rev: 5, shim: 0, depth: 15, tube: 35, murk: 10)),
+        .init(name: "Boombox in a Summer Camp", vibe: .playful, macro: 65, recipe: "Summer '99", style: "Dark Room", sensitivity:
+            s(eq: 20, sat: 35, odd: 50, roll: 20, gd: 0, blur: 0, rev: 20, shim: 0, depth: 0, tube: 45, murk: 20)),
+        .init(name: "Arcade at the Mall, 1989", vibe: .playful, macro: 60, recipe: "Crunch", style: "Tunnel", sensitivity:
+            s(eq: 0, sat: 25, odd: 60, roll: 30, gd: 15, blur: 35, rev: 30, shim: 15, depth: 0, tube: 30, murk: 0)),
+        .init(name: "Bubblegum Pop Radio", vibe: .playful, macro: 60, recipe: "Sweeten", style: "Plate", sensitivity:
+            s(eq: 10, sat: 40, odd: 35, roll: 5, gd: 0, blur: 10, rev: 35, shim: 30, depth: 25, tube: 20, murk: 10)),
+        .init(name: "Cardboard Box Fort", vibe: .playful, macro: 60, recipe: "Grandma's Kitchen", style: "Dark Room", sensitivity:
+            s(eq: 45, sat: 30, odd: 20, roll: 65, gd: 0, blur: 0, rev: 10, shim: 0, depth: 30, tube: 25, murk: 35)),
     ]
 
     static func presets(in vibe: Vibe) -> [GlobalPreset] { all.filter { $0.vibe == vibe } }
@@ -287,9 +291,9 @@ struct SuitePreset {
         .init(name: "Opening a Dust-Covered Childhood Scrapbook", vibe: .nostalgic,
               fx: "Old Photograph in a Shoebox", emulation: "Wedding Video, 1994", texture: "Shoebox of Polaroids"),
         .init(name: "Grandpa's Record Player on a Sunday", vibe: .nostalgic,
-              fx: "Grandpa's Favorite Record", emulation: "Jukebox in a Smoky Bar", texture: "Grandfather's Wood Radio"),
+              fx: "Grandpa's Turntable", emulation: "Jukebox in a Smoky Bar", texture: "Grandfather's Wood Radio"),
         .init(name: "Rewinding the Tape of Your 5th Birthday", vibe: .nostalgic,
-              fx: "VHS Tape of a Birthday Party", emulation: "Wedding Video, 1994", texture: "Worn VHS Tracking"),
+              fx: "Birthday Party on VHS", emulation: "Wedding Video, 1994", texture: "Worn VHS Tracking"),
         .init(name: "Mixtape From a Friend Who Moved Away", vibe: .nostalgic,
               fx: "Cassette From an Old Friend", emulation: "Church Choir on a Worn Cassette", texture: "Dusty Vinyl Sleeve"),
         // ── Calming ──
@@ -300,7 +304,7 @@ struct SuitePreset {
         .init(name: "The Sea From a Beach House Bedroom", vibe: .calming,
               fx: "Ocean Hush at Dusk", emulation: "Slow Tide Reel", texture: "Sea Glass"),
         .init(name: "Car Ride Home With Mom, Half Asleep", vibe: .calming,
-              fx: "Mom's Car Radio, 1996", emulation: "Lullaby on a Valve Radio", texture: "Wool Blanket"),
+              fx: "Mom's Car Stereo, Summer 1996", emulation: "Lullaby on a Valve Radio", texture: "Wool Blanket"),
         .init(name: "Snow Falling Outside Grandma's Window", vibe: .calming,
               fx: "Snow Day at Grandma's", emulation: "Lullaby on a Valve Radio", texture: "Wool Blanket"),
         // ── Inspiring ──
