@@ -33,7 +33,7 @@ final class OfflineChain {
     private let wf = TapeWowFlutter(), er = TapeSelfErasure()
     private let fs1 = SubsonicFilter(), fs2 = SubsonicFilter()
     private let gl = GlowGlue(), gt = Grit(), mb = MelodyBlur(), smr = SmearBlur(), swl = SwellBlur(), smk = SmokeBlur(), uw = UnderwaterBlur()
-    private let dp = Depth(), beq = FourBandEQ(), pt = PostTubeSaturator(), rt = ResonanceTamer(), sb = StereoBalancer(), mk = MurkFilter(), rg = RingGuard(), prv = ConvolutionReverb()
+    private let dp = Depth(), beq = FourBandEQ(), pt = PostTubeSaturator(), rt = ResonanceTamer(), sb = StereoBalancer(), tc = TubeCompressor(), ftc = TubeCompressor(), mk = MurkFilter(), rg = RingGuard(), prv = ConvolutionReverb()
     private let dyn = WebAudioCompressor(), ceiling = LookaheadLimiter()
     private let dry = UnsafeMutablePointer<Float>.allocate(capacity: 470)
     private let inGain: Float, fixedDrive: Float, postGain: Float
@@ -53,8 +53,9 @@ final class OfflineChain {
         wf.setStrength(s.wow); er.setStrength(s.erase)
         ta.setFuzz(s.fuzz); ta.setBloom(s.bloom); ta.setFur(s.fur)
         dyn.setSampleRate(Self.sampleRate)
+        tc.configure(enabled: s.compressor, ceilingDb: -24); ftc.configure(enabled: true, ceilingDb: -8)
         if s.compressor {
-            dyn.configure(thresholdDb: -18, kneeDb: 12, ratio: 4, attackSec: 0.01, releaseSec: 0.25, trimDb: -12)
+            dyn.configure(thresholdDb: 0, kneeDb: 0, ratio: 1, attackSec: 0.01, releaseSec: 0.25, trimDb: -12)
         } else {
             dyn.configure(thresholdDb: 0, kneeDb: 0, ratio: 20, attackSec: 0.001, releaseSec: 0.1, trimDb: -6)
         }
@@ -117,7 +118,9 @@ final class OfflineChain {
             fs1.process(a, count: n, channel: 0); fs1.process(b, count: n, channel: 1)
             fs2.process(a, count: n, channel: 0); fs2.process(b, count: n, channel: 1)
             dyn.process(left: a, right: b, count: n)
+            tc.process(left: a, right: b, count: n)
             for i in 0..<n { a[i] *= postGain; b[i] *= postGain }
+            ftc.process(left: a, right: b, count: n)
             ceiling.process(left: a, right: b, count: n)
             rt.process(left: a, right: b, count: n)
             done += n

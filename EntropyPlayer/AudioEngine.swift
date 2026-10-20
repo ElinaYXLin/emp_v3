@@ -88,6 +88,9 @@ final class AudioEngine {
     private let postTube         = PostTubeSaturator()
     private let resonanceTamer   = ResonanceTamer()
     private let stereoBalancer   = StereoBalancer()
+    /// Compressor mode's pre-Post-Gain stage, and the always-on final glue
+    /// before the limiter (after Post-Gain).
+    private let tubeComp = TubeCompressor(), finalTubeComp = TubeCompressor()
     private let murk             = MurkFilter()
     // Post reverb: after the final Tube saturator, on the finished sound.
     private let postReverb       = ConvolutionReverb()
@@ -453,12 +456,16 @@ final class AudioEngine {
         finalSub1.process(l, count: n, channel: 0); finalSub1.process(r, count: n, channel: 1)
         finalSub2.process(l, count: n, channel: 0); finalSub2.process(r, count: n, channel: 1)
         compressor.process(left: l, right: r, count: n)
+        tubeComp.process(left: l, right: r, count: n)
 
         var pg = postGainLinear
         vDSP_vsmul(l, 1, &pg, l, 1, vDSP_Length(n))
         vDSP_vsmul(r, 1, &pg, r, 1, vDSP_Length(n))
         // Safety ceiling: catches any Post-Gain overs gracefully instead
         // of letting them hard-clip at the final hardware conversion.
+        // Tube compressor right before the limiter, so with big Post-Gain the
+        // vari-mu catches loud passages smoothly and the limiter only shaves peaks.
+        finalTubeComp.process(left: l, right: r, count: n)
         outputCeiling.process(left: l, right: r, count: n)
         // Last: the resonance / 1–4 kHz tamer works on exactly what reaches
         // the ears (after post-gain and the limiter). It only ever cuts, so
@@ -711,6 +718,8 @@ final class AudioEngine {
         // compressor) AND a separate, always-on -6 dB "masterGain" headroom
         // stage after that. We were missing the second one entirely — net
         // trim should be -6 dB (limiter) / -12 dB (compressor), not 0 / -6.
+        tubeComp.configure(enabled: mode == .compressor, ceilingDb: -24)
+        finalTubeComp.configure(enabled: true, ceilingDb: -8)
         switch mode {
         case .limiter:
             // Brickwall: won't clip on its own, but a hard/fast ratio at
@@ -724,7 +733,9 @@ final class AudioEngine {
             // threshold, so it needs a fixed -6 dB trim to avoid clipping
             // on the way out — matches the web app's separate trim gain node,
             // plus the same -6 dB headroom stage as the limiter case.
-            compressor.configure(thresholdDb: -18, kneeDb: 12, ratio: 4,
+            // Vari-mu tube compressor does the compressing; the old stage only
+            // keeps its −12 dB trim (ratio 1 = no compression).
+            compressor.configure(thresholdDb: 0, kneeDb: 0, ratio: 1,
                                   attackSec: 0.01, releaseSec: 0.25, trimDb: -12)
         }
     }

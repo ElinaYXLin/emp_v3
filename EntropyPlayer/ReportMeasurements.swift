@@ -1,4 +1,5 @@
 import Foundation
+import Accelerate
 
 // Offline measurements for the Listener Report. Fresh DSP instances,
 // configured like the live chain, so measuring never disturbs playback.
@@ -60,64 +61,22 @@ struct Measurements {
 enum ReportMeasurer {
     static let sr = 44100.0
 
-    // MARK: Color chain (the nonlinear part) — mono
+    // MARK: Full chain — what actually leaves EMP
 
-    private static func renderColor(_ s: ChainSettings, _ input: [Float]) -> [Float] {
-        let n = input.count
-        let eq = PeakingBiquad(); eq.setParameters(frequency: 150, q: 0.1, gainDb: s.eqDb)
-        let ss = SubsonicFilter()
-        let rs = RecipeStage(); rs.configure(s.recipe, amount: (s.evenDb + s.oddDb) / 16)
-        let ev = WebAudioSaturator(voicing: .even)
-        ev.setDrive(driveDb: min(24, s.evenDb * s.recipe.evenMul)); ev.setBias(s.recipe.bias); ev.setWobble(s.wobble)
-        let od = WebAudioSaturator(voicing: .odd); od.setDrive(driveDb: min(24, s.oddDb * s.recipe.oddMul))
-        let th = TapeHysteresis(); th.setStrength(s.hysteresis)
-        let sg = TapeSag(); sg.setStrength(s.sag)
-        let er = TapeSelfErasure(); er.setStrength(s.erase)
-        let fs1 = SubsonicFilter(), fs2 = SubsonicFilter()
-        let beq = FourBandEQ(); beq.setGains(db: s.bandEQ)
-        let gt = Grit(); gt.set(bits: s.gritBits, softClip: s.gritClip, noise: 0)   // noise excluded from THD
-        let pt = PostTubeSaturator(); pt.configure(amount: s.postTube, recipe: s.recipe)
-        var ptScratch = [Float](repeating: 0, count: 470)
-        let ta = TubeAmp(); ta.setFuzz(s.fuzz); ta.setBloom(s.bloom); ta.setFur(s.fur)
-        let ro = HighRolloff(); ro.setSlope(dbPerOctave: s.rolloff)
-        let dyn = WebAudioCompressor(); dyn.setSampleRate(sr)
-        if s.compressor {
-            dyn.configure(thresholdDb: -18, kneeDb: 12, ratio: 4, attackSec: 0.01, releaseSec: 0.25, trimDb: -12)
-        } else {
-            dyn.configure(thresholdDb: 0, kneeDb: 0, ratio: 20, attackSec: 0.001, releaseSec: 0.1, trimDb: -6)
-        }
-        let fixedDrive = Float(pow(10, 7.0 / 20))
-        let gain = Float(pow(10, s.preampDb / 20)) * fixedDrive           // pre-amp + fixed drive
-        var x = input.map { $0 * gain }
-        x.withUnsafeMutableBufferPointer { b in
-            let p = b.baseAddress!
-            var i = 0
-            while i < n {                                   // realistic callback-sized blocks
-                let c = min(470, n - i), q = p + i
-                eq.process(q, count: c, channel: 0)
-                ss.process(q, count: c, channel: 0)
-                rs.pre(q, count: c, channel: 0)
-                ev.process(q, count: c, channel: 0)
-                od.process(q, count: c, channel: 0)
-                rs.post(q, count: c, channel: 0)
-                ro.process(q, count: c, channel: 0)
-                th.process(q, count: c, channel: 0)
-                er.process(q, count: c, channel: 0)
-                sg.process(left: q, right: nil, count: c)
-                ta.process(left: q, right: nil, count: c)
-                for j in 0..<c { q[j] /= fixedDrive }     // fixed +7 dB is undone after the saturation stage
-                gt.process(left: q, right: nil, count: c)
-                beq.process(q, count: c, channel: 0)
-                ptScratch.withUnsafeMutableBufferPointer { sb in      // mono: the right channel is scratch
-                    sb.baseAddress!.assign(from: q, count: c)
-                    pt.process(left: q, right: sb.baseAddress!, count: c)
-                }
-                fs1.process(q, count: c, channel: 0); fs2.process(q, count: c, channel: 0)
-                dyn.process(left: q, right: nil, count: c)
-                i += c
+    /// The whole offline chain (the same one Save/export uses), including
+    /// Post-Gain, the final tube compressor and the limiter. Mono in (both
+    /// channels), mid out, latency removed.
+    private static func renderFull(_ s: ChainSettings, _ input: [Float]) -> [Float] {
+        let ch = OfflineChain(s), lat = OfflineChain.latency, n = input.count
+        var l = input + [Float](repeating: 0, count: lat), r = l
+        let total = l.count
+        l.withUnsafeMutableBufferPointer { lb in
+            r.withUnsafeMutableBufferPointer { rb in
+                var i = 0
+                while i < total { let c = min(470, total - i); ch.process(left: lb.baseAddress! + i, right: rb.baseAddress! + i, count: c); i += c }
             }
         }
-        return x
+        return (0..<n).map { (l[$0 + lat] + r[$0 + lat]) * 0.5 }
     }
 
     // MARK: Haze chain (the temporal part) — stereo in, mid out
@@ -164,44 +123,64 @@ enum ReportMeasurer {
 
     // MARK: Analysis helpers
 
-    /// Amplitude of an integer-Hz sinusoid over [from, to) — exact bin for 1 s windows.
-    private static func amplitude(_ x: [Float], _ f: Double, from: Int, to: Int) -> Double {
-        var re = 0.0, im = 0.0
-        for i in from..<to {
-            let w = 2 * Double.pi * f * Double(i) / sr
-            re += Double(x[i]) * cos(w); im += Double(x[i]) * sin(w)
-        }
-        return 2 * (re * re + im * im).squareRoot() / Double(to - from)
+    /// Power spectrum (Hann, 2^16 points) of the last 65 536 samples.
+    /// Tones are then measured as the energy in a ±3.5 % band around each
+    /// frequency: with Wow/Flutter on, the pitch wobbles by up to ~±2 %, so
+    /// an exact-frequency probe missed most of the fundamental (THD+N read
+    /// over 100 %).
+    private static func powerSpectrum(_ x: [Float]) -> [Double] {
+        let log2n = vDSP_Length(16), N = 1 << 16
+        let seg = Array(x.suffix(N))
+        var win = [Float](repeating: 0, count: N); vDSP_hann_window(&win, vDSP_Length(N), Int32(vDSP_HANN_NORM))
+        var w = [Float](repeating: 0, count: N); vDSP_vmul(seg, 1, win, 1, &w, 1, vDSP_Length(N))
+        var re = [Float](repeating: 0, count: N / 2), im = re
+        let setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2))!
+        defer { vDSP_destroy_fftsetup(setup) }
+        re.withUnsafeMutableBufferPointer { rp in im.withUnsafeMutableBufferPointer { ip in
+            var split = DSPSplitComplex(realp: rp.baseAddress!, imagp: ip.baseAddress!)
+            w.withUnsafeBufferPointer { wb in
+                wb.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: N / 2) { vDSP_ctoz($0, 2, &split, 1, vDSP_Length(N / 2)) }
+            }
+            vDSP_fft_zrip(setup, &split, 1, log2n, FFTDirection(kFFTDirection_Forward))
+        } }
+        return (0..<(N / 2)).map { Double(re[$0] * re[$0] + im[$0] * im[$0]) }
     }
 
-    private static func meanSquare(_ x: [Float], from: Int, to: Int) -> Double {
-        var e = 0.0, mean = 0.0
-        for i in from..<to { mean += Double(x[i]) }
-        mean /= Double(to - from)
-        for i in from..<to { let v = Double(x[i]) - mean; e += v * v }
-        return e / Double(to - from)
+    /// Energy within ±3.5 % (at least ±4 Hz) of `f`.
+    private static func bandPower(_ P: [Double], _ f: Double) -> Double {
+        let N = Double(1 << 16), bw = max(4, 0.035 * f)
+        let lo = max(1, Int((f - bw) / sr * N)), hi = min(P.count - 1, Int((f + bw) / sr * N))
+        return lo <= hi ? P[lo...hi].reduce(0, +) : 0
+    }
+
+    /// Total energy 20 Hz–20 kHz.
+    private static func totalPower(_ P: [Double]) -> Double {
+        let N = Double(1 << 16)
+        return P[Int(20 / sr * N)...Int(20000 / sr * N)].reduce(0, +)
     }
 
     // MARK: Measurements
 
     static func measure(_ s: ChainSettings) -> Measurements {
-        let n = Int(sr) * 2, a = n / 2          // 1 s settle, analyze the 2nd second
+        // 5 s settle (level-tracking stages, compressors), then analyze the last
+        // 65 536 samples (~1.5 s).
+        let n = Int(sr) * 6 + (1 << 16)
 
         func toneTest(_ f: Double) -> (thd: Double, thdn: Double, h2: Double, h3: Double) {
             // −6 dB re a full-scale input.
             let x = (0..<n).map { Float(0.5 * sin(2 * Double.pi * f * Double($0) / sr)) }
-            let y = renderColor(s, x)
-            let h1 = amplitude(y, f, from: a, to: n)
-            var sum = 0.0, h2 = 0.0, h3 = 0.0
-            for k in 2...10 where f * Double(k) < sr / 2 {
-                let hk = amplitude(y, f * Double(k), from: a, to: n)
-                if k == 2 { h2 = hk }; if k == 3 { h3 = hk }
-                sum += hk * hk
+            let y = renderFull(s, x)       // after every stage, Post-Gain and limiter
+            let P = powerSpectrum(y)
+            let p1 = bandPower(P, f)
+            var sum = 0.0, p2 = 0.0, p3 = 0.0
+            for k in 2...10 where f * Double(k) * 1.04 < 20000 {
+                let pk = bandPower(P, f * Double(k))
+                if k == 2 { p2 = pk }; if k == 3 { p3 = pk }
+                sum += pk
             }
-            let residual = max(0, meanSquare(y, from: a, to: n) - h1 * h1 / 2)
-            let fundRMS = h1 / 2.0.squareRoot()
-            return (h1 > 0 ? sum.squareRoot() / h1 * 100 : 0,
-                    fundRMS > 0 ? residual.squareRoot() / fundRMS * 100 : 0, h2, h3)
+            let residual = max(0, totalPower(P) - p1)
+            return (p1 > 0 ? (sum / p1).squareRoot() * 100 : 0,
+                    p1 > 0 ? (residual / p1).squareRoot() * 100 : 0, p2.squareRoot(), p3.squareRoot())
         }
         let t100 = toneTest(100), t1k = toneTest(1000)
 
@@ -213,9 +192,10 @@ enum ReportMeasurer {
             return Float(tones.enumerated().reduce(0) { acc, e in
                 acc + each * sin(2 * Double.pi * e.element * t + Double(e.offset) * 1.1) })
         }
-        let ym = renderColor(s, mt)
-        let total = meanSquare(ym, from: a, to: n)
-        let toneEnergy = tones.reduce(0) { acc, f in let A = amplitude(ym, f, from: a, to: n); return acc + A * A / 2 }
+        let ym = renderFull(s, mt)
+        let Pm = powerSpectrum(ym)
+        let total = totalPower(Pm)
+        let toneEnergy = tones.reduce(0) { $0 + bandPower(Pm, $1) }
         let imd = total > 0 ? max(0, total - toneEnergy) / total * 100 : 0
 
         // Smear: a click (after 0.5 s of silence so effect glides settle) through the haze chain.

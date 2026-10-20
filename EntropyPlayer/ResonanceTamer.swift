@@ -302,8 +302,12 @@ final class RingGuard {
         let holdFrames = Float(0.06 * Self.frameRate)
         let E = env[0], HD = hold[0]
         for k in 1..<B {
-            // Undertones: energy an octave up explains energy here.
-            let ref = max(pDry[k], 2 * k < B ? pDry[2 * k] : 0)
+            // Undertones: energy an octave up explains energy here. Harmonics:
+            // energy at ½, ⅓, ¼ of this frequency (a note whose 2nd–4th
+            // harmonic lands here) explains it too — otherwise the guard
+            // stripped the saturators' harmonics off sustained, pure notes.
+            let harm = max(pDry[max(1, k / 2)], pDry[max(1, k / 3)], pDry[max(1, k / 4)]) * 0.1
+            let ref = max(pDry[k], 2 * k < B ? pDry[2 * k] : 0, harm)
             if ref >= E[k] { E[k] = ref; HD[k] = holdFrames }
             else if HD[k] > 0 { HD[k] -= 1 }
             else { E[k] = max(ref, E[k] * fall) }

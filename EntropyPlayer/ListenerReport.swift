@@ -82,7 +82,7 @@ extension AppState {
         let shimRT     = shimmer > 0 ? 0.095 * 3 / -log10(0.40 + 0.50 * shimmer) : 0   // loop trip / dB per trip → RT60
 
         var cs = ChainSettings()
-        cs.preampDb = preampDb; cs.eqDb = eqDb; cs.evenDb = evenDb; cs.oddDb = oddDb
+        cs.fileTrimDb = AudioEngine.fileTrimDb; cs.preampDb = preampDb; cs.postGainDb = postGainDb; cs.murk = eff("murk"); cs.recipe = SaturatorRecipe.named(satRecipe); cs.eqDb = eqDb; cs.evenDb = evenDb; cs.oddDb = oddDb
         cs.recipe = recipe; cs.hysteresis = hyst; cs.sag = sag; cs.depth = depthAmt; cs.bandEQ = bandEQ; cs.postTube = postTube / 100; cs.reverbStyle = reverbStyle; cs.postReverb = postReverb / 100; cs.blurSmear = eff("bsmear"); cs.blurWash = eff("bwash"); cs.blurSwell = eff("bswell"); cs.blurDiffuse = eff("bdiffuse"); cs.blurSmoke = eff("bsmoke"); cs.blurUnderwater = eff("bunder"); cs.gritBits = eff("bits"); cs.gritClip = eff("softclip"); cs.gritNoise = eff("gnoise"); cs.gritCorpus = eff("corpus"); cs.gritRattle = eff("rattle"); cs.wow = wow; cs.erase = erase; cs.wobble = wobble; cs.fuzz = fuzz; cs.bloom = bloom; cs.fur = fur; cs.choirVoices = cVoices; cs.choirDetune = cDetune; cs.choirDelay = cDelay; cs.choirVibrato = cVib; cs.rolloff = rollSlope
         cs.compressor = dynamicsMode == .compressor
         cs.gdScale = gdScale; cs.blur = blur; cs.grain = grain
@@ -443,7 +443,11 @@ struct ListenerReportCard: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(48)
-        .frame(width: 1080, height: 1780, alignment: .topLeading)
+        // Height follows the content (a fixed 1780 px cut the bottom off),
+        // at least 1780 so short reports keep the card proportions.
+        .frame(width: 1080, alignment: .topLeading)
+        .frame(minHeight: 1780, alignment: .topLeading)
+        .fixedSize(horizontal: false, vertical: true)
         .background(
             LinearGradient(colors: [hue(s: 0.55, b: 0.16), hue(0.06, s: 0.45, b: 0.08), Color.black],
                            startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -521,7 +525,7 @@ enum ListenerReportRenderer {
             return NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])
         }
         let host = NSHostingView(rootView: card)
-        host.frame = NSRect(x: 0, y: 0, width: 1080, height: 1780)
+        host.frame = NSRect(x: 0, y: 0, width: 1080, height: max(1780, host.fittingSize.height))
         host.layoutSubtreeIfNeeded()
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
         host.cacheDisplay(in: host.bounds, to: rep)
