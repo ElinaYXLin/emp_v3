@@ -925,6 +925,7 @@ final class AudioEngine {
         try check(AudioUnitInitialize(inAU), "init input")
         try check(AudioUnitInitialize(outAU), "init output")
         isSystemCapture = true
+        startRenderThread()
         try check(AudioOutputUnitStart(inAU), "start input")
         try check(AudioOutputUnitStart(outAU), "start output")
         captureDevices = (inputDeviceID, outputDeviceID)
@@ -950,7 +951,7 @@ final class AudioEngine {
             if self.diagTicks % (20 * 60) == 0 {
                 let u = self.captureRing.underruns, o = self.captureRing.overflows
                 if u + o + self.captureRenderFailures + self.captureOversized + self.captureOverloads > 0 {
-                    NSLog("[EntropyPlayer] System-mode glitches in last minute: capture render failures=%d, oversized=%d, ring underruns=%d, overflows=%d, DSP overloads=%d",
+                    NSLog("[EntropyPlayer] System-mode glitches in last minute: capture render failures=%d, oversized=%d, ring underruns=%d, overflows=%d, render fell behind=%d",
                           self.captureRenderFailures, self.captureOversized, u, o, self.captureOverloads)
                 }
                 let inRate = self.captureDevices.map { self.nominalRate($0.input) } ?? 0
@@ -980,6 +981,9 @@ final class AudioEngine {
     private func stopCaptureUnits() {
         removeRateListeners()
         isSystemCapture = false
+        // Units first (no more callbacks), then the render thread.
+        for au in [captureAU, outputAU].compactMap({ $0 }) { AudioOutputUnitStop(au) }
+        stopRenderThread()
         vizTimer?.invalidate(); vizTimer = nil
         for au in [captureAU, outputAU].compactMap({ $0 }) {
             AudioOutputUnitStop(au)
@@ -1073,29 +1077,20 @@ final class AudioEngine {
     }
 
     // Realtime output thread.
+    // Realtime output thread: only copies finished audio from the play ring.
+    // The DSP chain runs ahead on its own thread (see startRenderThread), so
+    // one slow block — a CPU spike from a game, say — is absorbed by the
+    // ~100 ms of audio already rendered instead of becoming a gap.
     fileprivate func renderCaptureOutput(_ ioData: UnsafeMutablePointer<AudioBufferList>, frames total: Int) {
-        let started = DispatchTime.now().uptimeNanoseconds
-        defer {
-            // A callback that runs past (most of) its buffer's duration makes
-            // the device play a glitch even though no ring ran dry.
-            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started) / 1e9
-            let budget = Double(total) / 44100
-            if elapsed > budget * 0.8 { captureOverloads += 1 }
-            captureMaxLoad = max(captureMaxLoad, elapsed / budget)
-        }
         let list = UnsafeMutableAudioBufferListPointer(ioData)
-        let ratio = captureRate / 44100
         var done = 0
         while done < total {
             let n = min(total - done, Self.maxRenderFrames)
             scratchL.withUnsafeMutableBufferPointer { lb in
                 scratchR.withUnsafeMutableBufferPointer { rb in
                     let l = lb.baseAddress!, r = rb.baseAddress!
-                    captureRing.read(left: l, right: r, count: n, baseRatio: ratio)
-                    var g = preampLinear
-                    vDSP_vsmul(l, 1, &g, l, 1, vDSP_Length(n))
-                    vDSP_vsmul(r, 1, &g, r, 1, vDSP_Length(n))
-                    renderChain(left: l, right: r, count: n)
+                    let got = playRing.read(left: l, right: r, count: n)
+                    if got < n { captureOverloads += 1 }          // render thread fell behind
                     if list.count > 0, let out = list[0].mData?.assumingMemoryBound(to: Float.self) {
                         (out + done).assign(from: l, count: n)
                     }
@@ -1110,6 +1105,76 @@ final class AudioEngine {
                 }
             }
             done += n
+        }
+        renderWake.signal()
+    }
+
+    // MARK: - Render-ahead thread (System mode)
+
+    /// Rendered audio kept ahead of the output device: 100 ms.
+    private static let renderAhead = 4410
+    private static let renderChunk = 512
+    private let playRing = PlayRing()
+    private let renderWake = DispatchSemaphore(value: 0)
+    private let renderExited = DispatchSemaphore(value: 0)
+    private let renderFlagLock = NSLock()
+    private var renderRunning = false
+    private var renderThread: Thread?
+    private let rtL = UnsafeMutablePointer<Float>.allocate(capacity: AudioEngine.renderChunk)
+    private let rtR = UnsafeMutablePointer<Float>.allocate(capacity: AudioEngine.renderChunk)
+
+    private func startRenderThread() {
+        playRing.reset()
+        renderFlagLock.lock(); renderRunning = true; renderFlagLock.unlock()
+        let ratio = captureRate / 44100
+        let t = Thread { [unowned self] in
+            Self.makeRealtime()
+            let n = Self.renderChunk, budget = Double(n) / 44100
+            while true {
+                self.renderFlagLock.lock(); let go = self.renderRunning; self.renderFlagLock.unlock()
+                if !go { break }
+                if self.playRing.fill < Self.renderAhead {
+                    let started = DispatchTime.now().uptimeNanoseconds
+                    self.captureRing.read(left: self.rtL, right: self.rtR, count: n, baseRatio: ratio)
+                    var g = self.preampLinear
+                    vDSP_vsmul(self.rtL, 1, &g, self.rtL, 1, vDSP_Length(n))
+                    vDSP_vsmul(self.rtR, 1, &g, self.rtR, 1, vDSP_Length(n))
+                    self.renderChain(left: self.rtL, right: self.rtR, count: n)
+                    self.playRing.write(left: self.rtL, right: self.rtR, count: n)
+                    let load = Double(DispatchTime.now().uptimeNanoseconds - started) / 1e9 / budget
+                    self.captureMaxLoad = max(self.captureMaxLoad, load)
+                } else {
+                    _ = self.renderWake.wait(timeout: .now() + .milliseconds(3))
+                }
+            }
+            self.renderExited.signal()
+        }
+        t.name = "EMP render-ahead"
+        t.qualityOfService = .userInteractive
+        renderThread = t
+        t.start()
+    }
+
+    private func stopRenderThread() {
+        guard renderThread != nil else { return }
+        renderFlagLock.lock(); renderRunning = false; renderFlagLock.unlock()
+        renderWake.signal()
+        _ = renderExited.wait(timeout: .now() + 1)
+        renderThread = nil
+    }
+
+    /// Mach time-constraint (realtime) scheduling, like Core Audio's own I/O
+    /// threads: ~11.6 ms period, up to 6 ms of computation per period.
+    private static func makeRealtime() {
+        var tb = mach_timebase_info_data_t(); mach_timebase_info(&tb)
+        func abs(_ ns: Double) -> UInt32 { UInt32(ns * Double(tb.denom) / Double(tb.numer)) }
+        var policy = thread_time_constraint_policy_data_t(period: abs(11_600_000), computation: abs(6_000_000),
+                                                           constraint: abs(11_600_000), preemptible: 1)
+        let count = mach_msg_type_number_t(MemoryLayout<thread_time_constraint_policy_data_t>.size / MemoryLayout<integer_t>.size)
+        _ = withUnsafeMutablePointer(to: &policy) { ptr in
+            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                thread_policy_set(pthread_mach_thread_np(pthread_self()), thread_policy_flavor_t(THREAD_TIME_CONSTRAINT_POLICY), $0, count)
+            }
         }
     }
 
@@ -1400,5 +1465,45 @@ final class ResamplingRing {
         let c2 = y0 - 2.5 * y1 + 2 * y2 - 0.5 * y3
         let c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2)
         return ((c3 * t + c2) * t + c1) * t + y1
+    }
+}
+
+// MARK: - Play ring
+
+/// Single-producer / single-consumer stereo FIFO between the render-ahead
+/// thread and the output callback. Preallocated; the lock only guards two
+/// indices for a few nanoseconds.
+final class PlayRing {
+    private static let size = 1 << 15                    // ~0.74 s
+    private let bufL = UnsafeMutablePointer<Float>.allocate(capacity: PlayRing.size)
+    private let bufR = UnsafeMutablePointer<Float>.allocate(capacity: PlayRing.size)
+    private var w = 0, r = 0
+    private let lock = NSLock()
+
+    init() {
+        bufL.initialize(repeating: 0, count: Self.size)
+        bufR.initialize(repeating: 0, count: Self.size)
+    }
+    deinit { bufL.deallocate(); bufR.deallocate() }
+
+    var fill: Int { lock.lock(); defer { lock.unlock() }; return w - r }
+
+    func reset() { lock.lock(); w = 0; r = 0; lock.unlock() }
+
+    func write(left: UnsafePointer<Float>, right: UnsafePointer<Float>, count: Int) {
+        lock.lock(); let w0 = w, room = Self.size - (w - r); lock.unlock()
+        let n = min(count, room), mask = Self.size - 1
+        for i in 0..<n { bufL[(w0 + i) & mask] = left[i]; bufR[(w0 + i) & mask] = right[i] }
+        lock.lock(); w = w0 + n; lock.unlock()
+    }
+
+    /// Reads up to `count` frames; the rest is silence. Returns frames read.
+    func read(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>, count: Int) -> Int {
+        lock.lock(); let r0 = r, avail = w - r; lock.unlock()
+        let n = min(count, avail), mask = Self.size - 1
+        for i in 0..<n { left[i] = bufL[(r0 + i) & mask]; right[i] = bufR[(r0 + i) & mask] }
+        for i in n..<count { left[i] = 0; right[i] = 0 }
+        lock.lock(); r = r0 + n; lock.unlock()
+        return n
     }
 }
