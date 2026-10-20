@@ -1,6 +1,8 @@
 import Foundation
 
-// Grain Echo: granular "memory" haze. Short overlapping grains are replayed
+// Grain Echo: granular "memory" haze. Overlapping grains (60 ms + 40 % of the
+// memory window, 8 at a time, near-regular, level-normalized so the haze breathes
+// smoothly instead of wavering) are replayed
 // from the last `memory` milliseconds of audio — each starting at a random
 // point in that window, detuned (±8 → ±35 cents with strength), Hann-windowed and
 // panned somewhere across the stereo field — and mixed quietly under the dry
@@ -21,9 +23,9 @@ final class GrainEcho {
     private static let fullScaleGain = 1.388   // measured: puts full strength at maxMixDb
     private static let minDetuneCents = 8.0
     private static let maxDetuneCents = 35.0
-    private static let overlap = 4.0
+    private static let overlap = 8.0             // was 4: more, overlapping grains average out
     private static let bufSize = 1 << 14            // ~370 ms
-    private static let voiceCount = 12
+    private static let voiceCount = 24
 
     private let lock = NSLock()
     private var targetStrength: Double = 0
@@ -40,6 +42,10 @@ final class GrainEcho {
     private var rng: UInt64 = 0x2545F4914F6CDD1D
     // Safety ceiling: the haze never exceeds ~1.5× the dry signal's level.
     private var dryEnv: Float = 0, hazeEnv: Float = 0, ceilingGain: Float = 1
+    private var fastEnv: Float = 0, slowEnv: Float = 0      // transient softener for the grain source
+    private static let envFast = Float(1 - exp(-1 / (0.004 * 44100.0)))   // power envelopes: 4 ms / 60 ms
+    private static let envSlow = Float(1 - exp(-1 / (0.060 * 44100.0)))   // attack, shared 150 ms release
+    private static let envRel = Float(1 - exp(-1 / (0.150 * 44100.0)))
 
     private struct Voice {
         var active = false
@@ -78,7 +84,7 @@ final class GrainEcho {
 
     private func spawnGrain(memory: Double, detune: Double) {
         // Low quality: at most 6 simultaneous grains (of 12).
-        if lowQuality && voices.lazy.filter(\.active).count >= 6 { return }
+        if lowQuality && voices.lazy.filter(\.active).count >= 10 { return }
         guard let v = voices.firstIndex(where: { !$0.active }) else { return }
         let grainLen = Self.grainLength(memory: memory)
         let cents = (random() * 2 - 1) * detune
@@ -93,7 +99,7 @@ final class GrainEcho {
         // window is shorter than minBack, and every grain started exactly
         // 25 ms back — one fixed 25 ms comb (a static resonance ladder).
         let back = minBack + random() * max(0.035 * Self.sampleRate, memory - minBack)
-        let pan = random() * 2 - 1                         // −1…1
+        let pan = (random() * 2 - 1) * 0.6                 // ±0.6: no hard-panned grains flickering one ear
         let angle = (pan + 1) * Double.pi / 4              // equal-power
         voices[v] = Voice(active: true,
                           pos: Double(writeIdx) - back,
@@ -106,7 +112,7 @@ final class GrainEcho {
 
     /// Grain length in samples: 30 ms plus a quarter of the memory window.
     private static func grainLength(memory: Double) -> Double {
-        0.030 * sampleRate + memory * 0.25
+        0.060 * sampleRate + memory * 0.4            // longer grains = smoother swells
     }
 
     @inline(__always) private func read(_ b: UnsafeMutablePointer<Float>, _ pos: Double) -> Float {
@@ -130,8 +136,16 @@ final class GrainEcho {
         for i in 0..<count {
             let l = left[i]
             let r = right?[i] ?? l
-            bufL[writeIdx & mask] = l
-            bufR[writeIdx & mask] = r
+            // Grains read a transient-softened copy: attacks are pulled down to
+            // a slow (60 ms) envelope, so replaying random moments from the
+            // last ~200 ms re-fires sustained tone, not drum hits and
+            // consonants (which made the echo stutter).
+            let pw = 0.5 * (l * l + r * r)
+            fastEnv += (pw > fastEnv ? Self.envFast : Self.envRel) * (pw - fastEnv)
+            slowEnv += (pw > slowEnv ? Self.envSlow : Self.envRel) * (pw - slowEnv)
+            let soft = min(1, ((slowEnv + 1e-12) / (fastEnv + 1e-12)).squareRoot())
+            bufL[writeIdx & mask] = l * soft
+            bufR[writeIdx & mask] = r * soft
             writeIdx &+= 1
             if idle { continue }
 
@@ -148,13 +162,14 @@ final class GrainEcho {
                 spawnGrain(memory: memory,
                            detune: Self.minDetuneCents + (Self.maxDetuneCents - Self.minDetuneCents) * strength)
                 let hop = Self.grainLength(memory: memory) / Self.overlap
-                untilNextGrain = hop * (0.7 + random() * 0.6)
+                untilNextGrain = hop * (0.9 + random() * 0.2)   // near-regular spawning (was ±30 %)
             }
 
-            var outL: Float = 0, outR: Float = 0
+            var outL: Float = 0, outR: Float = 0, wsum2: Float = 0
             for v in 0..<voices.count where voices[v].active {
                 let ph = voices[v].phase
                 let w = Float(sin(Double.pi * ph)); let win = w * w      // Hann
+                wsum2 += win * win
                 let s = (read(bufL, voices[v].pos) + read(bufR, voices[v].pos)) * 0.5 * win
                 outL += s * voices[v].gainL
                 outR += s * voices[v].gainR
@@ -163,13 +178,19 @@ final class GrainEcho {
                 if voices[v].phase >= 1 { voices[v].active = false }
             }
 
+            // Incoherent grains add in power: normalize by √Σwin² so the haze's
+            // level doesn't rise and fall with how many grains happen to
+            // overlap (calibrated to the old 4-grain overlap's average, 1.5).
+            // (×1.6 makes up the ~4 dB the transient softener takes off.)
+            let norm = 1.6 * (1.5 / max(wsum2, 0.2)).squareRoot()
+            outL *= norm; outR *= norm
             // Safety ceiling (fast attack, slow release) so overlapping grains
             // that happen to line up can never swell into a loud burst.
             let dl = max(abs(l), abs(r)), hl = max(abs(outL), abs(outR)) * mix
             dryEnv += (dl > dryEnv ? 0.01 : 0.0003) * (dl - dryEnv)
             hazeEnv += (hl > hazeEnv ? 0.01 : 0.0003) * (hl - hazeEnv)
             let want = min(1, 1.5 * dryEnv / max(hazeEnv, 1e-6))
-            ceilingGain += (want < ceilingGain ? 0.02 : 0.0005) * (want - ceilingGain)
+            ceilingGain += (want < ceilingGain ? 0.004 : 0.0003) * (want - ceilingGain)   // gentler (was 0.02: audible ducking)
             outL *= ceilingGain; outR *= ceilingGain
 
             // Level compensation (measured on pink noise): dry + haze would
