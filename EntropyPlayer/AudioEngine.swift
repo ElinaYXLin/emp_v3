@@ -3,6 +3,7 @@ import AudioToolbox
 import CoreAudio
 import AppKit
 import Accelerate
+import os
 
 // File-level C-callable callbacks for System mode's raw HAL units.
 // Non-capturing → implicitly @convention(c) → safe to pass as AURenderCallback.
@@ -936,9 +937,9 @@ final class AudioEngine {
         try check(AudioUnitInitialize(inAU), "init input")
         try check(AudioUnitInitialize(outAU), "init output")
         isSystemCapture = true
-        startRenderThread()
         try check(AudioOutputUnitStart(inAU), "start input")
         try check(AudioOutputUnitStart(outAU), "start output")
+        startRenderThread()
         captureDevices = (inputDeviceID, outputDeviceID)
         addRateListeners()
 
@@ -967,8 +968,8 @@ final class AudioEngine {
                 }
                 let inRate = self.captureDevices.map { self.nominalRate($0.input) } ?? 0
                 let outRate = self.captureDevices.map { self.nominalRate($0.output) } ?? 0
-                NSLog("[EntropyPlayer] System-mode health: peak DSP load %.0f%%, ring fill %.0f/4096, clock correction %+.3f%%, input %.0f Hz (captured at %.0f), output %.0f Hz",
-                      self.captureMaxLoad * 100, self.captureRing.fillLevel, self.captureRing.correction * 100,
+                NSLog("[EntropyPlayer] System-mode health: render cushion %d ms, peak DSP load %.0f%%, ring fill %.0f/4096, clock correction %+.3f%%, input %.0f Hz (captured at %.0f), output %.0f Hz",
+                      self.renderTarget * 1000 / 44100, self.captureMaxLoad * 100, self.captureRing.fillLevel, self.captureRing.correction * 100,
                       inRate, self.captureRate, outRate)
                 if inRate > 0, abs(inRate - self.captureRate) > 1, let d = self.captureDevices {
                     NSLog("[EntropyPlayer] Input rate drifted from capture rate — restarting System capture")
@@ -1101,7 +1102,7 @@ final class AudioEngine {
                 scratchR.withUnsafeMutableBufferPointer { rb in
                     let l = lb.baseAddress!, r = rb.baseAddress!
                     let got = playRing.read(left: l, right: r, count: n)
-                    if got < n { captureOverloads += 1 }          // render thread fell behind
+                    if got < n { captureOverloads += 1; renderStarved = true }   // render thread fell behind
                     if list.count > 0, let out = list[0].mData?.assumingMemoryBound(to: Float.self) {
                         (out + done).assign(from: l, count: n)
                     }
@@ -1123,7 +1124,10 @@ final class AudioEngine {
     // MARK: - Render-ahead thread (System mode)
 
     /// Rendered audio kept ahead of the output device: 100 ms.
-    private static let renderAhead = 4410
+    private static let renderAhead = 4410            // starting cushion: 100 ms
+    private static let renderAheadMax = 17640        // grows to 400 ms after dropouts
+    private var renderTarget = AudioEngine.renderAhead
+    private var renderStarved = false                // set by the output callback on an underrun
     private static let renderChunk = 512
     private let playRing = PlayRing()
     private let renderWake = DispatchSemaphore(value: 0)
@@ -1136,15 +1140,44 @@ final class AudioEngine {
 
     private func startRenderThread() {
         playRing.reset()
+        renderTarget = Self.renderAhead; renderStarved = false
         renderFlagLock.lock(); renderRunning = true; renderFlagLock.unlock()
         let ratio = captureRate / 44100
+        let outAU = outputAU
         let t = Thread { [unowned self] in
             Self.makeRealtime()
+            // Join the output device's audio workgroup, so the scheduler treats
+            // this thread as part of the device's realtime I/O (on Apple Silicon
+            // it stays on performance cores and isn't starved by games).
+            var wg: WorkGroup?
+            var token: WorkGroup.JoinToken?
+            if let au = outAU {
+                var sz = UInt32(MemoryLayout<WorkGroup?>.size)
+                if AudioUnitGetProperty(au, AudioUnitPropertyID(2015) /* kAudioOutputUnitProperty_OSWorkgroup (hidden from Swift) */, kAudioUnitScope_Global, 0, &wg, &sz) == noErr,
+                   let g = wg { token = g.join() }
+            }
             let n = Self.renderChunk, budget = Double(n) / 44100
+            var lastBump = DispatchTime.now().uptimeNanoseconds, lastDecay = lastBump
             while true {
                 self.renderFlagLock.lock(); let go = self.renderRunning; self.renderFlagLock.unlock()
                 if !go { break }
-                if self.playRing.fill < Self.renderAhead {
+                // Adaptive cushion: a dropout means a system-wide stall outlasted
+                // the buffer (Space switch, a game hitch) — grow it by 100 ms (up
+                // to 400 ms). After 2 clean minutes, ease back 50 ms at a time.
+                let now = DispatchTime.now().uptimeNanoseconds
+                if self.renderStarved {
+                    self.renderStarved = false
+                    self.renderTarget = min(Self.renderAheadMax, self.renderTarget + 4410)
+                    lastBump = now; lastDecay = now
+                } else if now - lastBump > 120_000_000_000, now - lastDecay > 120_000_000_000 {
+                    self.renderTarget = max(Self.renderAhead, self.renderTarget - 2205)
+                    lastDecay = now
+                }
+                // Refill in short bursts (at most 2 chunks, then yield): a long
+                // burst exceeds the realtime computation budget and the kernel
+                // demotes the thread — exactly when the system is busy.
+                var burst = 0
+                while burst < 2 && self.playRing.fill < self.renderTarget {
                     let started = DispatchTime.now().uptimeNanoseconds
                     self.captureRing.read(left: self.rtL, right: self.rtR, count: n, baseRatio: ratio)
                     var g = self.preampLinear
@@ -1154,10 +1187,11 @@ final class AudioEngine {
                     self.playRing.write(left: self.rtL, right: self.rtR, count: n)
                     let load = Double(DispatchTime.now().uptimeNanoseconds - started) / 1e9 / budget
                     self.captureMaxLoad = max(self.captureMaxLoad, load)
-                } else {
-                    _ = self.renderWake.wait(timeout: .now() + .milliseconds(3))
+                    burst += 1
                 }
+                _ = self.renderWake.wait(timeout: .now() + .milliseconds(burst == 2 ? 1 : 3))
             }
+            if let g = wg, let tk = token { g.leave(token: tk) }
             self.renderExited.signal()
         }
         t.name = "EMP render-ahead"
