@@ -1131,9 +1131,13 @@ final class AudioEngine {
     private static let renderChunk = 512
     private let playRing = PlayRing()
     private let renderWake = DispatchSemaphore(value: 0)
-    private let renderExited = DispatchSemaphore(value: 0)
     private let renderFlagLock = NSLock()
-    private var renderRunning = false
+    private var renderGen = 0                         // bumped to retire the current render thread
+    /// Held by a render thread for its whole life: a new thread takes it first,
+    /// so it waits (on its own thread) for the old one to finish — the main
+    /// thread never blocks on the realtime thread (that was a QoS inversion).
+    private let renderOwner = NSLock()
+    private var renderAlive = false                  // true while a render thread is inside its loop
     private var renderThread: Thread?
     private let rtL = UnsafeMutablePointer<Float>.allocate(capacity: AudioEngine.renderChunk)
     private let rtR = UnsafeMutablePointer<Float>.allocate(capacity: AudioEngine.renderChunk)
@@ -1141,10 +1145,16 @@ final class AudioEngine {
     private func startRenderThread() {
         playRing.reset()
         renderTarget = Self.renderAhead; renderStarved = false
-        renderFlagLock.lock(); renderRunning = true; renderFlagLock.unlock()
+        renderFlagLock.lock(); renderGen += 1; let myGen = renderGen; renderFlagLock.unlock()
         let ratio = captureRate / 44100
         let outAU = outputAU
         let t = Thread { [unowned self] in
+            self.renderOwner.lock()                   // wait for any previous render thread to exit
+            self.renderFlagLock.lock(); self.renderAlive = true; self.renderFlagLock.unlock()
+            defer {
+                self.renderFlagLock.lock(); self.renderAlive = false; self.renderFlagLock.unlock()
+                self.renderOwner.unlock()
+            }
             Self.makeRealtime()
             // Join the output device's audio workgroup, so the scheduler treats
             // this thread as part of the device's realtime I/O (on Apple Silicon
@@ -1159,7 +1169,7 @@ final class AudioEngine {
             let n = Self.renderChunk, budget = Double(n) / 44100
             var lastBump = DispatchTime.now().uptimeNanoseconds, lastDecay = lastBump
             while true {
-                self.renderFlagLock.lock(); let go = self.renderRunning; self.renderFlagLock.unlock()
+                self.renderFlagLock.lock(); let go = self.renderGen == myGen; self.renderFlagLock.unlock()
                 if !go { break }
                 // Adaptive cushion: a dropout means a system-wide stall outlasted
                 // the buffer (Space switch, a game hitch) — grow it by 100 ms (up
@@ -1192,7 +1202,6 @@ final class AudioEngine {
                 _ = self.renderWake.wait(timeout: .now() + .milliseconds(burst == 2 ? 1 : 3))
             }
             if let g = wg, let tk = token { g.leave(token: tk) }
-            self.renderExited.signal()
         }
         t.name = "EMP render-ahead"
         t.qualityOfService = .userInteractive
@@ -1202,10 +1211,17 @@ final class AudioEngine {
 
     private func stopRenderThread() {
         guard renderThread != nil else { return }
-        renderFlagLock.lock(); renderRunning = false; renderFlagLock.unlock()
+        renderFlagLock.lock(); renderGen += 1; renderFlagLock.unlock()
         renderWake.signal()
-        _ = renderExited.wait(timeout: .now() + 1)
         renderThread = nil
+        // Let it leave the DSP chain before anything else uses it (normal
+        // playback after System mode). Poll briefly rather than block on a
+        // primitive the realtime thread owns (a QoS priority inversion).
+        for _ in 0..<50 {
+            renderFlagLock.lock(); let alive = renderAlive; renderFlagLock.unlock()
+            if !alive { break }
+            usleep(1000)
+        }
     }
 
     /// Mach time-constraint (realtime) scheduling, like Core Audio's own I/O
